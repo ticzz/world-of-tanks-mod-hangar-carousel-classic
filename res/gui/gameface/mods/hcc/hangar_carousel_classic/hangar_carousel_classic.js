@@ -51,7 +51,7 @@ const SORT_DIRECTION_ICONS = {
   ascending: "^"
 };
 
-let state = { stats: {}, statsConfig: {}, sorting: {}, actionCards: {}, carousel: { rows: 2 }, filters: [], activeFilters: [], enabled: false };
+let state = { stats: {}, statsConfig: {}, filtering: {}, sorting: {}, actionCards: {}, carousel: { rows: 2 }, filters: [], activeFilters: [], enabled: false };
 let lastStateJson = "";
 let lastActiveFiltersJson = "";
 let lastStatsDiagnostic = "";
@@ -356,7 +356,7 @@ function renderNativeFilterPanel() {
   newSection.appendChild(refresh);
   refresh.addEventListener("click", () => callCommand("onRefresh"));
 
-  if (Array.isArray(state.filters) && state.filters.length) {
+  if (state.filtering?.enabled !== false && Array.isArray(state.filters) && state.filters.length) {
     addHeading(newSection, labels().filters);
     const filters = document.createElement("div");
     filters.className = "hcc-native-filters";
@@ -513,4 +513,3 @@ engine.whenReady.then(() => {
   syncModel();
   scheduleRender();
 });
-

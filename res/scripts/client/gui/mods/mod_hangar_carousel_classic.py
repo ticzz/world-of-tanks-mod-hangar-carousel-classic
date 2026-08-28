@@ -37,7 +37,7 @@ try:
 except Exception:
     carousel_filter_module = None
 MOD_ID = 'mod_hangar_carousel_classic'
-MOD_VERSION = '1.0.6'
+MOD_VERSION = '1.0.9'
 MOD_LINKAGE_ID = 'mod_hangar.carousel.classic'
 PLAYLIST_ID_PREFIX = 'mhcc_'
 APPDATA_ROOT = os.environ.get('APPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming'))
@@ -63,6 +63,7 @@ NATIVE_RESOURCE_HASHES = (
 )
 DEFAULT_CONFIG = {'schemaVersion': 5,
  'enabled': True,
+ 'filtering': {'enabled': True},
  'tankfilters': {'bonus': {'enabled': True},
                  'favorite': {'enabled': True},
                  'elite': {'enabled': True},
@@ -237,7 +238,7 @@ def _deep_merge(base, override):
 
 
 def _migrate_config(loaded):
-    """Migrate old config format to new XVM-compatible sorting schema."""
+    """Migrate old config format to new sorting schema."""
     schema = loaded.get('schemaVersion', 0)
     
     # v0-4 -> v5: Convert old sortMode/descending to sorting_criteria
@@ -452,85 +453,6 @@ def fini():
     RUNTIME_STATE = {}
     ACTIVE_FILTERS = set()  # Reinit; clear() unnecessary
     SETTINGS_REGISTERED = False
-
-
-def _deep_merge(base, override):
-    result = dict(base)
-    for key, value in override.items():
-        if isinstance(value, dict) and isinstance(result.get(key), dict):
-            result[key] = _deep_merge(result[key], value)
-        else:
-            result[key] = value
-
-    return result
-
-
-def _migrate_config(loaded):
-    """Migrate old config format to new XVM-compatible sorting schema."""
-    schema = loaded.get('schemaVersion', 0)
-    
-    # v0-4 -> v5: Convert old sortMode/descending to sorting_criteria
-    if schema < 5:
-        sorting = loaded.get('sorting', {})
-        if 'sortMode' in sorting or 'descending' in sorting:
-            old_mode = sorting.get('sortMode', 'default')
-            old_descending = sorting.get('descending', True)
-            
-            # Map old modes to new sorting_criteria format
-            if old_mode == 'default':
-                sorting['sorting_criteria'] = _default_sorting_criteria()
-            elif old_mode == 'battles':
-                sorting['sorting_criteria'] = ['-battles' if old_descending else 'battles']
-            elif old_mode == 'winRate':
-                sorting['sorting_criteria'] = ['-winRate' if old_descending else 'winRate']
-            elif old_mode == 'averageDamage':
-                sorting['sorting_criteria'] = ['-damageRating' if old_descending else 'damageRating']
-            elif old_mode == 'marksOnGun':
-                sorting['sorting_criteria'] = ['-marksOnGun' if old_descending else 'marksOnGun']
-            elif old_mode == 'lastPlayed':
-                sorting['sorting_criteria'] = ['-lastPlayed' if old_descending else 'lastPlayed']
-            
-            # Remove old keys
-            sorting.pop('sortMode', None)
-            sorting.pop('descending', None)
-            sorting.pop('options', None)
-            sorting.pop('default', None)
-            loaded['sorting'] = sorting
-            LOGGER.info('Migrated config from sortMode/descending to sorting_criteria')
-    
-    loaded['schemaVersion'] = 5
-    return loaded
-
-
-def _load_config():
-    try:
-        with io.open(CONFIG_PATH, 'r', encoding='utf-8-sig') as config_file:
-            loaded = json.load(config_file)
-        if not isinstance(loaded, dict):
-            raise ValueError('root value must be an object')
-        merged = _deep_merge(DEFAULT_CONFIG, _migrate_config(loaded))
-        merged['cardStats'] = _normalized_card_stats_config(merged.get('cardStats', {}))
-        return merged
-    except IOError:
-        LOGGER.info('No user config at %s; using defaults', CONFIG_PATH)
-    except Exception:
-        LOGGER.exception('Invalid config at %s; using defaults', CONFIG_PATH)
-
-    return _deep_merge(DEFAULT_CONFIG, {})
-
-
-def _load_runtime():
-    try:
-        with io.open(RUNTIME_PATH, 'r', encoding='utf-8-sig') as runtime_file:
-            loaded = json.load(runtime_file)
-        if isinstance(loaded, dict):
-            return _deep_merge(RUNTIME_DEFAULT, loaded)
-    except IOError:
-        pass
-    except Exception:
-        LOGGER.exception('Invalid runtime state at %s; using defaults', RUNTIME_PATH)
-
-    return _deep_merge(RUNTIME_DEFAULT, {})
 
 
 def _save_config():
@@ -1061,10 +983,9 @@ def _get_sort_value(vehicle, criterion, account_random_stats, vehicle_cuts):
 
 def _build_sort_json(account_random_stats=None, vehicle_cuts=None):
     """Build JSON payload with hierarchical sorting criteria (nation -> type -> tier etc.)."""
-    if not CONFIG.get('sorting', {}).get('enabled', True):
-        return json.dumps({'criteria': [], 'values': {}}, separators=(',', ':'))
-    
-    sorting_criteria = _get_configured_sorting_criteria()
+    sorting_enabled = bool(CONFIG.get('sorting', {}).get('enabled', True))
+    filtering_enabled = bool(CONFIG.get('filtering', {}).get('enabled', True))
+    sorting_criteria = _get_configured_sorting_criteria() if sorting_enabled else []
     # Tuple comparator reads from index 0 to N, so keep the user order intact:
     # first configured criterion is the primary key.
     applied_criteria = list(sorting_criteria)
@@ -1095,7 +1016,8 @@ def _build_sort_json(account_random_stats=None, vehicle_cuts=None):
             vehicle_cuts = {}
     
     # Build hierarchical sort key for each vehicle
-    payload = {'criteria': applied_criteria, 'values': {}, 'allowed': [], 'filtered': bool(ACTIVE_FILTERS)}
+    payload = {'criteria': applied_criteria, 'values': {}, 'allowed': [],
+               'filtered': bool(filtering_enabled and ACTIVE_FILTERS)}
     if vehicles:
         for vehicle in vehicles.values():
             sort_key = tuple(_get_sort_value(vehicle, c, account_random_stats, vehicle_cuts) for c in applied_criteria)
@@ -1104,7 +1026,8 @@ def _build_sort_json(account_random_stats=None, vehicle_cuts=None):
             inventory_id = getattr(vehicle, 'inventoryId', getattr(vehicle, 'inventoryID', None))
             if inventory_id is not None:
                 payload['values'][str(inventory_id)] = sort_key
-            if not ACTIVE_FILTERS or all(_matches(filter_id, vehicle) for filter_id in ACTIVE_FILTERS):
+            if (not filtering_enabled or not ACTIVE_FILTERS or
+                    all(_matches(filter_id, vehicle) for filter_id in ACTIVE_FILTERS)):
                 payload['allowed'].append(str(vehicle_id))
                 if inventory_id is not None:
                     payload['allowed'].append(str(inventory_id))
@@ -1366,6 +1289,7 @@ def _build_payload():
      'enabled': bool(CONFIG.get('enabled', True)),
      'filterMode': 'native_toggles',
      'filters': filters,
+     'filtering': {'enabled': bool(CONFIG.get('filtering', {}).get('enabled', True))},
      'stats': stats,
      'statsConfig': stats_config,
      'sorting': {'enabled': bool(CONFIG.get('sorting', {}).get('enabled', True)),
@@ -1664,7 +1588,7 @@ def _patch_vehicle_statistics_presenter():
 
     def patched_update_vehicles(self, vehicles):
         filtered_vehicles = vehicles
-        if ACTIVE_FILTERS and vehicles is not None:
+        if CONFIG.get('filtering', {}).get('enabled', True) and ACTIVE_FILTERS and vehicles is not None:
             filtered_vehicles = dict(((int_cd, vehicle) for int_cd, vehicle in vehicles.items()
              if all((_matches(filter_id, vehicle) for filter_id in ACTIVE_FILTERS))))
         if original_update_vehicles:
@@ -1704,23 +1628,32 @@ def _settings_tooltip(title, body):
 
 
 SETTINGS_TEXT = {'en': {'display': u'Carousel and cards',
-    'sorting': u'Sorting (XVM-compatible)',
+    'filtering': u'Filtering',
+    'filteringTooltip': u'Enable or disable filtering. Individual filters are toggled in the HCC filter panel in the hangar.',
+    'sorting': u'Sorting',
+    'sortingTooltip': u'Enable or disable HCC sorting. The buttons in the HCC panel set one sorting rule at a time. Use the MSA Sort criteria field below to configure multiple rules as a hierarchy.',
     'cardStatsFields': u'Card statistics fields',
     'native': u'Already provided by the client: Premium, Elite, rented/temporary, daily bonus and Battle Pass points available.',
     'enabled': u'Enable Hangar Carousel Classic',
     'cardStats': u'Show statistics on vehicle cards',
+    'cardStatsTooltip': u'Enable or disable the statistics overlay on vehicle cards. The fields below control which values are shown.',
     'minBattles': u'Minimum battles for card statistics',
+    'minBattlesTooltip': u'Only vehicles with at least this many battles receive a card-statistics overlay.',
     'rows': u'Carousel rows',
+    'rowsTooltip': u'Choose the number of vehicle rows. Automatic mode adapts the row count to the number of matching vehicles.',
     'auto': u'Automatic',
     'sortingCriteria': u'Sort criteria',
-    'sortingCriteriaTooltip': u'Comma-separated hierarchy. Supported values: nation, type, level, maxBattleTier, premium, battles, winRate, markOfMastery, damageRating, marksOnGun, battlePassPoints, lastPlayed. Prefix a value with - to reverse its order (example: -battles).',
+    'sortingCriteriaTooltip': u'Configure multiple sorting rules as a hierarchy. The first value is primary, followed by tie-breakers. HCC panel buttons set only one rule at a time. Supported values: nation, type, level, maxBattleTier, premium, battles, winRate, markOfMastery, damageRating, marksOnGun, battlePassPoints, lastPlayed. Prefix a value with - to reverse its order (example: -battles).',
     'nationsOrder': u'Nation order',
     'nationsOrderTooltip': u'Comma-separated nation priority, for example: ussr, germany, usa, china, france, uk, japan, czech, poland, sweden, italy.',
     'typesOrder': u'Type order',
     'typesOrderTooltip': u'Comma-separated vehicle type priority, for example: lightTank, mediumTank, heavyTank, AT-SPG, SPG.',
     'hideBuyTank': u'Hide "Buy vehicle" cell',
+    'hideBuyTankTooltip': u'Hide the client cell used to buy a vehicle.',
     'hideBuySlot': u'Hide "Buy slot" cell',
+    'hideBuySlotTooltip': u'Hide the client cell used to buy a garage slot.',
     'hideRestoreTank': u'Hide "Restore vehicle" cell',
+    'hideRestoreTankTooltip': u'Hide the client cell used to restore a vehicle.',
     'restart': u'Changes are applied immediately; restart the client after changing the master switch.'}}
 
 
@@ -1733,6 +1666,7 @@ def _register_settings():
         text = SETTINGS_TEXT['en']
         
         # Current config values
+        filtering_enabled = bool(CONFIG.get('filtering', {}).get('enabled', True))
         sorting_enabled = bool(CONFIG.get('sorting', {}).get('enabled', True))
         sorting_criteria = _get_configured_sorting_criteria()
         nations_order = CONFIG.get('sorting', {}).get('nations_order', [])
@@ -1748,8 +1682,10 @@ def _register_settings():
         
         # Build UI columns
         column1 = [templates.createLabel(text['display']),
-         templates.createCheckbox(text['cardStats'], 'cardStatsEnabled', bool(card_stats.get('enabled', True))),
-         templates.createNumericStepper(text['minBattles'], 'minimumBattles', int(card_stats.get('minimumBattles', 1)), 0, 1000, 1, manual=True),
+         templates.createCheckbox(text['cardStats'], 'cardStatsEnabled', bool(card_stats.get('enabled', True)),
+                                  tooltip=_settings_tooltip(text['cardStats'], text['cardStatsTooltip'])),
+         templates.createNumericStepper(text['minBattles'], 'minimumBattles', int(card_stats.get('minimumBattles', 1)), 0, 1000, 1,
+                                        manual=True, tooltip=_settings_tooltip(text['minBattles'], text['minBattlesTooltip'])),
          templates.createLabel(text['cardStatsFields']),
          templates.createCheckbox(u'Battles', 'showBattles', 'battles' in card_stat_fields),
          templates.createCheckbox(u'Win rate', 'showWinRate', 'winRate' in card_stat_fields),
@@ -1761,17 +1697,24 @@ def _register_settings():
           u'1',
           u'2',
          u'3',
-         u'4'], rows_value)]
+         u'4'], rows_value, tooltip=_settings_tooltip(text['rows'], text['rowsTooltip']))]
         
-        column2 = [templates.createLabel(text['sorting']),
-         templates.createCheckbox(text['sorting'], 'sortingEnabled', sorting_enabled),
+        column2 = [templates.createLabel(text['filtering'], tooltip=_settings_tooltip(text['filtering'], text['filteringTooltip'])),
+         templates.createCheckbox(text['filtering'], 'filteringEnabled', filtering_enabled,
+                                  tooltip=_settings_tooltip(text['filtering'], text['filteringTooltip'])),
+         templates.createLabel(text['sorting'], tooltip=_settings_tooltip(text['sorting'], text['sortingTooltip'])),
+         templates.createCheckbox(text['sorting'], 'sortingEnabled', sorting_enabled,
+                                  tooltip=_settings_tooltip(text['sorting'], text['sortingTooltip'])),
          templates.createInput(text['sortingCriteria'], 'sortingCriteria', criteria_str, tooltip=_settings_tooltip(text['sortingCriteria'], text['sortingCriteriaTooltip'])),
          templates.createInput(text['nationsOrder'], 'nationsOrder', nations_str, tooltip=_settings_tooltip(text['nationsOrder'], text['nationsOrderTooltip'])),
          templates.createInput(text['typesOrder'], 'typesOrder', types_str, tooltip=_settings_tooltip(text['typesOrder'], text['typesOrderTooltip'])),
          templates.createEmpty(8),
-         templates.createCheckbox(text['hideBuyTank'], 'hideBuyTank', bool(CONFIG.get('actionCards', {}).get('hideBuyTank', False))),
-         templates.createCheckbox(text['hideBuySlot'], 'hideBuySlot', bool(CONFIG.get('actionCards', {}).get('hideBuySlot', False))),
-         templates.createCheckbox(text['hideRestoreTank'], 'hideRestoreTank', bool(CONFIG.get('actionCards', {}).get('hideRestoreTank', False)))]
+         templates.createCheckbox(text['hideBuyTank'], 'hideBuyTank', bool(CONFIG.get('actionCards', {}).get('hideBuyTank', False)),
+                                  tooltip=_settings_tooltip(text['hideBuyTank'], text['hideBuyTankTooltip'])),
+         templates.createCheckbox(text['hideBuySlot'], 'hideBuySlot', bool(CONFIG.get('actionCards', {}).get('hideBuySlot', False)),
+                                  tooltip=_settings_tooltip(text['hideBuySlot'], text['hideBuySlotTooltip'])),
+         templates.createCheckbox(text['hideRestoreTank'], 'hideRestoreTank', bool(CONFIG.get('actionCards', {}).get('hideRestoreTank', False)),
+                                  tooltip=_settings_tooltip(text['hideRestoreTank'], text['hideRestoreTankTooltip']))]
         
         template = {'modDisplayName': u'Hangar Carousel Classic',
          'settingsVersion': 5,
@@ -1781,7 +1724,7 @@ def _register_settings():
         # ModsSettingsAPI auto-deregisters callback on mod unload; no manual deregister needed
         g_modsSettingsApi.setModTemplate(MOD_LINKAGE_ID, template, _on_settings_changed)
         SETTINGS_REGISTERED = True
-        LOGGER.info('ModsSettingsAPI integration registered (XVM-compatible sorting + 7 filters)')
+        LOGGER.info('ModsSettingsAPI integration registered (sorting + 7 filters)')
     except Exception:
         LOGGER.exception('Unable to register ModsSettingsAPI integration')
 
@@ -1838,6 +1781,9 @@ def _on_settings_changed(linkage, settings):
             card_stats['fields'] = [field for field, setting_key in field_settings
                                     if bool(settings.get(setting_key, field in current_fields))]
         sorting = CONFIG.setdefault('sorting', {})
+        filtering = CONFIG.setdefault('filtering', {})
+        if filtering is not None:
+            filtering['enabled'] = bool(settings.get('filteringEnabled', True))
         if sorting is not None:
             sorting['enabled'] = bool(settings.get('sortingEnabled', True))
         
@@ -1866,6 +1812,7 @@ def _on_settings_changed(linkage, settings):
         actions['hideRestoreTank'] = bool(settings.get('hideRestoreTank', False))
         
         _save_config()
+        _refresh_native_vehicle_model()
         _set_carousel_rows(int(settings.get('carouselRows', 0)))
         for model in list(MODELS):
             model.refresh()
