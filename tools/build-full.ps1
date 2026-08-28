@@ -8,6 +8,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($PackagePath)) {
+    throw "PackagePath is required. This script builds a fullpack from an already-built .wotmod. Run 'build.ps1' instead, or call this script directly with -PackagePath '<path-to>.wotmod' -Version '<version>'."
+}
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $PackagePath = [IO.Path]::GetFullPath($PackagePath)
 
