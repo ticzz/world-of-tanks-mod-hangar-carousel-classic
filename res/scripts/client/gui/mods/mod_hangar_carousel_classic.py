@@ -37,7 +37,7 @@ try:
 except Exception:
     carousel_filter_module = None
 MOD_ID = 'mod_hangar_carousel_classic'
-MOD_VERSION = '1.0.9'
+MOD_VERSION = '1.0.10'
 MOD_LINKAGE_ID = 'mod_hangar.carousel.classic'
 PLAYLIST_ID_PREFIX = 'mhcc_'
 APPDATA_ROOT = os.environ.get('APPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming'))
@@ -333,6 +333,9 @@ LAST_DATA_SUMMARY = None
 LEGACY_PLAYLISTS_REMOVED = False
 TOOLTIP_PAYLOAD_LOGGED = False
 SETTINGS_REGISTERED = False
+MSA_API = None
+MSA_SETTINGS = {}
+MSA_SYNCING = False
 DOSSIER_CACHE = {}
 DOSSIER_CACHE_GENERATION = 0
 DOSSIER_FETCH_COUNTER = 0
@@ -424,7 +427,7 @@ def _add_safe_provider(provider_list, provider, max_size=50):
 
 
 def fini():
-    global SETTINGS_REGISTERED, DOSSIER_CACHE_GENERATION, DOSSIER_FETCH_COUNTER, LAST_DATA_SUMMARY, TOOLTIP_PAYLOAD_LOGGED, LEGACY_PLAYLISTS_REMOVED, CONFIG, RUNTIME_STATE, ACTIVE_FILTERS
+    global SETTINGS_REGISTERED, DOSSIER_CACHE_GENERATION, DOSSIER_FETCH_COUNTER, LAST_DATA_SUMMARY, TOOLTIP_PAYLOAD_LOGGED, LEGACY_PLAYLISTS_REMOVED, CONFIG, RUNTIME_STATE, ACTIVE_FILTERS, MSA_API, MSA_SETTINGS, MSA_SYNCING
     try:
         g_playerEvents.onAvatarReady -= _track_last_played
     except Exception:
@@ -453,6 +456,9 @@ def fini():
     RUNTIME_STATE = {}
     ACTIVE_FILTERS = set()  # Reinit; clear() unnecessary
     SETTINGS_REGISTERED = False
+    MSA_API = None
+    MSA_SETTINGS = {}
+    MSA_SYNCING = False
 
 
 def _save_config():
@@ -1224,6 +1230,7 @@ def _set_filter_state(filter_id):
     
     RUNTIME_STATE['activeFilters'] = sorted(ACTIVE_FILTERS)
     _save_runtime()
+    _sync_msa_filter_settings()
     _sync_sort_property()
     _refresh_native_vehicle_model()
     
@@ -1235,6 +1242,62 @@ def _set_filter_state(filter_id):
         except Exception:
             LOGGER.exception('Error refreshing model after filter state change')
     LOGGER.info('Filter state toggled for %s; active filters: %s', filter_id, sorted(active_snapshot))
+
+
+def _sync_msa_filter_settings():
+    """Persist HCC filter changes to MSA without reloading an open settings window."""
+    global MSA_SYNCING
+    if MSA_API is None or not MSA_SETTINGS or MSA_SYNCING:
+        return
+    update_settings = dict(MSA_SETTINGS)
+    for filter_id in FILTER_ORDER:
+        if filter_id == 'all':
+            continue
+        update_settings['filter_%s' % filter_id] = filter_id in ACTIVE_FILTERS
+    try:
+        update_method = getattr(MSA_API, 'updateModSettings', None)
+        if callable(update_method):
+            MSA_SYNCING = True
+            update_method(MOD_LINKAGE_ID, update_settings)
+            MSA_SETTINGS.clear()
+            MSA_SETTINGS.update(update_settings)
+    except Exception:
+        LOGGER.exception('Unable to synchronize HCC filters to ModsSettingsAPI')
+    finally:
+        MSA_SYNCING = False
+
+
+def _apply_msa_filter_settings(settings):
+    """Apply individual MSA filter checkboxes to the shared HCC filter state."""
+    global ACTIVE_FILTERS
+    changed = False
+    active_filters = set(ACTIVE_FILTERS)
+    for filter_id in FILTER_ORDER:
+        if filter_id == 'all':
+            continue
+        setting_key = 'filter_%s' % filter_id
+        if setting_key not in settings:
+            continue
+        enabled = bool(settings.get(setting_key))
+        if enabled and filter_id not in active_filters:
+            active_filters.add(filter_id)
+            changed = True
+        elif not enabled and filter_id in active_filters:
+            active_filters.discard(filter_id)
+            changed = True
+    if not changed:
+        return
+    ACTIVE_FILTERS = active_filters
+    RUNTIME_STATE['activeFilters'] = sorted(ACTIVE_FILTERS)
+    _save_runtime()
+    _sync_sort_property()
+    _refresh_native_vehicle_model()
+    for model in list(MODELS):
+        try:
+            model.refresh()
+        except Exception:
+            LOGGER.exception('Error refreshing model after MSA filter change')
+    LOGGER.info('Filter state synchronized from ModsSettingsAPI: %s', sorted(ACTIVE_FILTERS))
 
 
 def _build_payload():
@@ -1629,7 +1692,15 @@ def _settings_tooltip(title, body):
 
 SETTINGS_TEXT = {'en': {'display': u'Carousel and cards',
     'filtering': u'Filtering',
-    'filteringTooltip': u'Enable or disable filtering. Individual filters are toggled in the HCC filter panel in the hangar.',
+    'filteringTooltip': u'Enable or disable filtering. Individual filters can be toggled here in MSA or in the HCC filter panel. HCC changes synchronize the MSA values and vehicle list; MSA changes synchronize the HCC panel and vehicle list.',
+    'filterBonus': u'Bonus crew XP',
+    'filterFavorite': u'Favorite tanks',
+    'filterElite': u'Elite tanks',
+    'filterPremium': u'Premium tanks',
+    'filterNonElite': u'Non-elite tanks',
+    'filterNotReady': u'Broken / crew incomplete',
+    'filterMarksIncomplete': u'Marks incomplete (Tier V+)',
+    'filterCrewNotMaxed': u'Crew level below 75%',
     'sorting': u'Sorting',
     'sortingTooltip': u'Enable or disable HCC sorting. The buttons in the HCC panel set one sorting rule at a time. Use the MSA Sort criteria field below to configure multiple rules as a hierarchy.',
     'cardStatsFields': u'Card statistics fields',
@@ -1658,7 +1729,7 @@ SETTINGS_TEXT = {'en': {'display': u'Carousel and cards',
 
 
 def _register_settings():
-    global SETTINGS_REGISTERED
+    global SETTINGS_REGISTERED, MSA_API, MSA_SETTINGS
     if SETTINGS_REGISTERED:
         return
     try:
@@ -1699,9 +1770,24 @@ def _register_settings():
          u'3',
          u'4'], rows_value, tooltip=_settings_tooltip(text['rows'], text['rowsTooltip']))]
         
-        column2 = [templates.createLabel(text['filtering'], tooltip=_settings_tooltip(text['filtering'], text['filteringTooltip'])),
+        filter_settings = (
+            ('bonus', 'filterBonus'),
+            ('favorite', 'filterFavorite'),
+            ('elite', 'filterElite'),
+            ('premium', 'filterPremium'),
+            ('non_elite', 'filterNonElite'),
+            ('not_ready', 'filterNotReady'),
+            ('marks_incomplete', 'filterMarksIncomplete'),
+            ('crew_not_maxed', 'filterCrewNotMaxed')
+        )
+        filter_controls = [templates.createLabel(text['filtering'], tooltip=_settings_tooltip(text['filtering'], text['filteringTooltip'])),
          templates.createCheckbox(text['filtering'], 'filteringEnabled', filtering_enabled,
-                                  tooltip=_settings_tooltip(text['filtering'], text['filteringTooltip'])),
+                                  tooltip=_settings_tooltip(text['filtering'], text['filteringTooltip']))]
+        for filter_id, text_key in filter_settings:
+            filter_controls.append(templates.createCheckbox(
+                text[text_key], 'filter_%s' % filter_id, filter_id in ACTIVE_FILTERS,
+                tooltip=_settings_tooltip(text[text_key], text['filteringTooltip'])))
+        column2 = filter_controls + [
          templates.createLabel(text['sorting'], tooltip=_settings_tooltip(text['sorting'], text['sortingTooltip'])),
          templates.createCheckbox(text['sorting'], 'sortingEnabled', sorting_enabled,
                                   tooltip=_settings_tooltip(text['sorting'], text['sortingTooltip'])),
@@ -1717,14 +1803,18 @@ def _register_settings():
                                   tooltip=_settings_tooltip(text['hideRestoreTank'], text['hideRestoreTankTooltip']))]
         
         template = {'modDisplayName': u'Hangar Carousel Classic',
-         'settingsVersion': 5,
+         'settingsVersion': 6,
          'enabled': bool(CONFIG.get('enabled', True)),
          'column1': column1,
          'column2': column2}
         # ModsSettingsAPI auto-deregisters callback on mod unload; no manual deregister needed
         g_modsSettingsApi.setModTemplate(MOD_LINKAGE_ID, template, _on_settings_changed)
+        MSA_API = g_modsSettingsApi
+        saved_settings = g_modsSettingsApi.getModSettings(MOD_LINKAGE_ID, template)
+        if isinstance(saved_settings, dict):
+            MSA_SETTINGS = dict(saved_settings)
         SETTINGS_REGISTERED = True
-        LOGGER.info('ModsSettingsAPI integration registered (sorting + 7 filters)')
+        LOGGER.info('ModsSettingsAPI integration registered (sorting + 8 filters)')
     except Exception:
         LOGGER.exception('Unable to register ModsSettingsAPI integration')
 
@@ -1733,7 +1823,13 @@ def _on_settings_changed(linkage, settings):
     if linkage != MOD_LINKAGE_ID:
         return
     try:
-        global CONFIG
+        global CONFIG, MSA_SETTINGS
+        if MSA_SYNCING:
+            MSA_SETTINGS.clear()
+            MSA_SETTINGS.update(settings or {})
+            return
+        if isinstance(settings, dict):
+            MSA_SETTINGS = dict(settings)
         current_config = json.loads(json.dumps(CONFIG)) if CONFIG else {}
         was_enabled = bool(CONFIG.get('enabled', True)) if CONFIG else False
         is_enabled = bool(settings.get('enabled', was_enabled))
@@ -1784,6 +1880,7 @@ def _on_settings_changed(linkage, settings):
         filtering = CONFIG.setdefault('filtering', {})
         if filtering is not None:
             filtering['enabled'] = bool(settings.get('filteringEnabled', True))
+        _apply_msa_filter_settings(settings)
         if sorting is not None:
             sorting['enabled'] = bool(settings.get('sortingEnabled', True))
         
