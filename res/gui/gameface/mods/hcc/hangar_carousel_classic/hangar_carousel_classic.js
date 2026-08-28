@@ -4,6 +4,7 @@ const CARD_PREFIX = "vehicleCard-";
 const LABELS = {
   en: {
     filters: "HCC filters",
+    filter_count_description: "ALL shows the vehicles matching every active filter; each filter count shows the matching vehicles within that current selection.",
     filter_all: "All vehicles",
     filter_bonus: "Bonus crew XP",
     filter_favorite: "Favorite tanks",
@@ -17,6 +18,7 @@ const LABELS = {
     sort_battles: "Battles",
     sort_winRate: "Win rate",
     sort_averageDamage: "Average damage",
+    sort_alphaDamage: "Alpha damage",
     sort_marksOnGun: "Marks of Excellence",
     sort_lastPlayed: "Last played (HCC)",
     sorting: "HCC sorting",
@@ -42,6 +44,7 @@ const SORT_ICONS = {
   battles: "##",
   winRate: "WR",
   averageDamage: "DMG",
+  alphaDamage: "ALPHA",
   marksOnGun: "MOE",
   lastPlayed: "LP"
 };
@@ -303,10 +306,14 @@ function bindTooltip(button, title, description) {
   button.addEventListener("click", hideTooltip);
 }
 
-function addHeading(parent, text) {
+function addHeading(parent, text, description = "") {
   const heading = document.createElement("div");
   heading.className = "hcc-native-heading";
   heading.textContent = text;
+  if (description) {
+    heading.title = description;
+    bindTooltip(heading, text, description);
+  }
   parent.appendChild(heading);
 }
 
@@ -357,7 +364,7 @@ function renderNativeFilterPanel() {
   refresh.addEventListener("click", () => callCommand("onRefresh"));
 
   if (state.filtering?.enabled !== false && Array.isArray(state.filters) && state.filters.length) {
-    addHeading(newSection, labels().filters);
+    addHeading(newSection, labels().filters, labels().filter_count_description);
     const filters = document.createElement("div");
     filters.className = "hcc-native-filters";
     newSection.appendChild(filters);

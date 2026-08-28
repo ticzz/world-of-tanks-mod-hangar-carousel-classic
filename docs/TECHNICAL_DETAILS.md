@@ -78,7 +78,7 @@ Supported criteria:
 - battles / -battles
 - winRate / -winRate
 - markOfMastery / -markOfMastery
-- damageRating / -damageRating
+- averageDamage / -averageDamage
 - marksOnGun / -marksOnGun
 - battlePassPoints / -battlePassPoints
 - lastPlayed / -lastPlayed
@@ -99,7 +99,7 @@ Use these examples inside sorting.sorting_criteria:
 1. nation, type, level
 2. nation, type, -level
 3. -winRate, -battles, level
-4. premium, nation, type, -damageRating
+4. premium, nation, type, -averageDamage
 5. -lastPlayed
 6. nation, type, -markOfMastery, -marksOnGun
 

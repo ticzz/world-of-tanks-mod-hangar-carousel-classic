@@ -84,7 +84,8 @@ DEFAULT_CONFIG = {'schemaVersion': 5,
              'types_order': [],
              'available_criteria': ['nation', 'type', 'level', '-level', 'maxBattleTier', '-maxBattleTier', 'premium', '-premium',
                                     'battles', '-battles', 'winRate', '-winRate', 'markOfMastery', '-markOfMastery',
-                                    'damageRating', '-damageRating', 'marksOnGun', '-marksOnGun', 'battlePassPoints', '-battlePassPoints'],
+                                    'averageDamage', '-averageDamage', 'alphaDamage', '-alphaDamage', 'marksOnGun', '-marksOnGun',
+                                    'battlePassPoints', '-battlePassPoints'],
              'sorting_criteria': ['nation', 'type', 'level']},
  'actionCards': {'hideBuyTank': False,
                  'hideBuySlot': False,
@@ -107,12 +108,13 @@ SERVICES = _Services()
 FILTER_ORDER = ('all', 'bonus', 'favorite', 'elite', 'premium', 'non_elite', 'not_ready', 'marks_incomplete', 'crew_not_maxed')
 SORT_CRITERIA_ORDER = ('nation', 'type', 'level', '-level', 'maxBattleTier', '-maxBattleTier', 'premium', '-premium',
                        'battles', '-battles', 'winRate', '-winRate', 'markOfMastery', '-markOfMastery',
-                       'damageRating', '-damageRating', 'marksOnGun', '-marksOnGun', 'battlePassPoints', '-battlePassPoints', 'lastPlayed', '-lastPlayed')
+                       'averageDamage', '-averageDamage', 'alphaDamage', '-alphaDamage', 'marksOnGun', '-marksOnGun',
+                       'battlePassPoints', '-battlePassPoints', 'lastPlayed', '-lastPlayed')
 SORT_DEFAULT_CRITERIA = ('nation', 'type', 'level')
 SORT_UI_OPTION_ORDER = ('nation', 'type', 'level', 'maxBattleTier', 'premium', 'battles', 'winRate', 'markOfMastery',
-                        'damageRating', 'marksOnGun', 'battlePassPoints', 'lastPlayed')
+                       'averageDamage', 'alphaDamage', 'marksOnGun', 'battlePassPoints', 'lastPlayed')
 SORT_CRITERION_ALIASES = {'tier': 'level',
- 'averageDamage': 'damageRating'}
+ 'damageRating': 'averageDamage'}
 
 
 def _default_sorting_criteria():
@@ -255,7 +257,7 @@ def _migrate_config(loaded):
             elif old_mode == 'winRate':
                 sorting['sorting_criteria'] = ['-winRate' if old_descending else 'winRate']
             elif old_mode == 'averageDamage':
-                sorting['sorting_criteria'] = ['-damageRating' if old_descending else 'damageRating']
+                sorting['sorting_criteria'] = ['-averageDamage' if old_descending else 'averageDamage']
             elif old_mode == 'marksOnGun':
                 sorting['sorting_criteria'] = ['-marksOnGun' if old_descending else 'marksOnGun']
             elif old_mode == 'lastPlayed':
@@ -410,19 +412,41 @@ def _on_account_become_player(*_args, **_kwargs):
     _schedule_post_battle_refresh()
 
 
-def _add_safe_provider(provider_list, provider, max_size=50):
-    """Add provider to list with deduplication and size limit to prevent memory leaks."""
+def _add_safe_provider(provider_list, provider):
+    """Track a provider without finalizing native objects owned by the game."""
     if provider in provider_list:
         return  # Already tracking this provider
-    if len(provider_list) >= max_size:
-        # Remove oldest provider and attempt finalization (may fail; log and continue)
-        oldest = provider_list.pop(0)
-        try:
-            if hasattr(oldest, '_finalize'):
-                oldest._finalize()
-        except Exception as e:
-            LOGGER.warning('Unable to finalize evicted provider: %s', e)
     provider_list.append(provider)
+
+
+def _native_provider_method(provider, name):
+    method = getattr(provider, name, None)
+    if not callable(method):
+        LOGGER.warning('Native provider method unavailable: %s', name)
+        return None
+    return method
+
+
+def _set_native_provider_rows(provider, rows):
+    if not hasattr(provider, '_VehicleFiltersDataProvider__rowCount'):
+        LOGGER.warning('Native provider row-count attribute unavailable')
+        return False
+    update_carousel = _native_provider_method(provider, '_VehicleFiltersDataProvider__updateCarousel')
+    if update_carousel is None:
+        return False
+    setattr(provider, '_VehicleFiltersDataProvider__rowCount', rows)
+    update_carousel()
+    return True
+
+
+def _refresh_native_provider(provider):
+    update_vehicles = _native_provider_method(provider, '_VehicleFiltersDataProvider__updateVehicles')
+    update_carousel = _native_provider_method(provider, '_VehicleFiltersDataProvider__updateCarousel')
+    if update_vehicles is None or update_carousel is None:
+        return False
+    update_vehicles()
+    update_carousel()
+    return True
 
 
 def fini():
@@ -539,8 +563,7 @@ def _apply_auto_rows(vehicle_count=None):
     _save_runtime()
     for provider in list(FILTER_PROVIDERS):
         try:
-            provider._VehicleFiltersDataProvider__rowCount = rows
-            provider._VehicleFiltersDataProvider__updateCarousel()
+            _set_native_provider_rows(provider, rows)
         except Exception:
             LOGGER.exception('Unable to apply automatic carousel rows after filter update (%d)', rows)
     for model in list(MODELS):
@@ -574,20 +597,11 @@ def _refresh_native_vehicle_model():
     try:
         for provider in list(FILTER_PROVIDERS):
             try:
-                provider._VehicleFiltersDataProvider__updateVehicles()
-                provider._VehicleFiltersDataProvider__updateCarousel()
+                _refresh_native_provider(provider)
             except Exception:
                 LOGGER.debug('Unable to refresh filter provider')
     except Exception:
         LOGGER.debug('Unable to refresh native vehicle model')
-
-
-def _refresh_models():
-    for model in list(MODELS):
-        try:
-            model.refresh()
-        except Exception:
-            LOGGER.exception('Unable to refresh HCC model after native provider loading')
 
 
 def _sync_sort_property():
@@ -610,8 +624,7 @@ def _set_carousel_rows(rows, automatic=False):
         effective_rows = _effective_carousel_rows()
         for provider in list(FILTER_PROVIDERS):
             try:
-                provider._VehicleFiltersDataProvider__rowCount = effective_rows
-                provider._VehicleFiltersDataProvider__updateCarousel()
+                _set_native_provider_rows(provider, effective_rows)
             except Exception:
                 LOGGER.exception('Unable to apply automatic carousel rows (%d)', effective_rows)
         for model in list(MODELS):
@@ -630,8 +643,7 @@ def _set_carousel_rows(rows, automatic=False):
     _sync_carousel_auto_property(_carousel_auto())
     for provider in list(FILTER_PROVIDERS):
         try:
-            provider._VehicleFiltersDataProvider__rowCount = rows
-            provider._VehicleFiltersDataProvider__updateCarousel()
+            _set_native_provider_rows(provider, rows)
         except Exception:
             LOGGER.exception('Unable to apply %d carousel rows', rows)
 
@@ -642,11 +654,12 @@ def _set_carousel_rows(rows, automatic=False):
 
 
 def _inventory_vehicles():
-    for provider in list(FILTER_PROVIDERS):
-        provider_vehicles = getattr(provider, 'vehicles', None)
-        if isinstance(provider_vehicles, dict):
-            return provider_vehicles
-    LOGGER.warning('Native vehicle provider unavailable; skipping payload build')
+    for presenter in reversed(list(STATISTICS_PRESENTERS)):
+        vehicles_component = getattr(presenter, '_vehiclesComponent', None)
+        presenter_vehicles = getattr(vehicles_component, 'vehicles', None)
+        if isinstance(presenter_vehicles, dict):
+            return presenter_vehicles
+    LOGGER.warning('Native statistics vehicle component unavailable; skipping payload build')
     return {}
 
 def _marks_on_gun(vehicle_dossier):
@@ -969,9 +982,12 @@ def _get_sort_value(vehicle, criterion, account_random_stats, vehicle_cuts):
         elif key == 'markOfMastery':
             if account_random_stats:
                 value = int(account_random_stats.getMarkOfMasteryForVehicle(vehicle.intCD) or 0)
-        elif key == 'damageRating':
+        elif key == 'averageDamage':
             stats = _build_stats(vehicle, account_random_stats, vehicle_cuts)
             value = int(stats.get('averageDamage', 0))
+        elif key == 'alphaDamage':
+            stats = _build_stats(vehicle, account_random_stats, vehicle_cuts)
+            value = int(stats.get('alphaDamage', 0))
         elif key == 'marksOnGun':
             stats = _build_stats(vehicle, account_random_stats, vehicle_cuts)
             value = int(round(float(stats.get('marksOnGun', 0.0)) * 100))
@@ -1208,6 +1224,15 @@ def _matches(filter_id, vehicle):
     return False
 
 
+def _filter_count(filter_id, vehicles):
+    active_filters = set(ACTIVE_FILTERS)
+    if filter_id == 'all':
+        required_filters = active_filters
+    else:
+        required_filters = active_filters | set((filter_id,))
+    return sum((1 for vehicle in vehicles if all((_matches(current_filter, vehicle) for current_filter in required_filters))))
+
+
 def _set_filter_state(filter_id):
     """Toggle filter state with atomic snapshot to prevent race conditions during model refresh."""
     if filter_id == 'all':
@@ -1340,7 +1365,7 @@ def _build_payload():
     # Calculate filter counts
     filters = []
     for filter_id in FILTER_ORDER:
-        count = sum((1 for vehicle in values if _matches(filter_id, vehicle)))
+        count = _filter_count(filter_id, values)
         filters.append({'id': filter_id, 'count': count})
     
     return {'version': MOD_VERSION,
@@ -1576,8 +1601,7 @@ def _patch_vehicle_filters_provider():
         result = original_on_loading(self, *args, **kwargs)
         if _is_frontline_filter(self):
             return result
-        _add_safe_provider(FILTER_PROVIDERS, self, max_size=50)
-        _register_callback(0.1, _refresh_models)
+        _add_safe_provider(FILTER_PROVIDERS, self)
         try:
             with self.viewModel.transaction() as model:
                 model.setHccCarouselAuto(_carousel_auto())
@@ -1591,8 +1615,7 @@ def _patch_vehicle_filters_provider():
                 RUNTIME_STATE['carouselRows'] = rows
                 _save_runtime()
             if rows != int(self.viewModel.getCarouselRowCount()):
-                self._VehicleFiltersDataProvider__rowCount = rows
-                self._VehicleFiltersDataProvider__updateCarousel()
+                _set_native_provider_rows(self, rows)
         except Exception:
             LOGGER.exception('Unable to apply HCC carousel row configuration')
         return result
@@ -1637,7 +1660,7 @@ def _patch_vehicle_statistics_presenter():
 
     def patched_init(self, *args, **kwargs):
         original_init(self, *args, **kwargs)
-        _add_safe_provider(STATISTICS_PRESENTERS, self, max_size=50)
+        _add_safe_provider(STATISTICS_PRESENTERS, self)
 
     def patched_finalize(self):
         try:
@@ -1689,7 +1712,7 @@ def _settings_tooltip(title, body):
 
 SETTINGS_TEXT = {'en': {'display': u'Carousel and cards',
     'filtering': u'Filtering',
-    'filteringTooltip': u'Enable or disable filtering. Individual filters can be toggled here in MSA or in the HCC filter panel. HCC changes synchronize the MSA values and vehicle list; MSA changes synchronize the HCC panel and vehicle list.',
+    'filteringTooltip': u'Enable or disable filtering. Individual filters can be toggled here in MSA or in the HCC filter panel. Counts use the current native vehicle list: ALL shows vehicles matching every active filter, and each filter count shows matching vehicles within that current selection. HCC changes synchronize the MSA values and vehicle list; MSA changes synchronize the HCC panel and vehicle list.',
     'filterBonus': u'Bonus crew XP',
     'filterBonusTooltip': u'Show only vehicles with an active daily crew-XP bonus [x2/x5] (daily XP multiplier greater than 1).',
     'filterFavorite': u'Favorite tanks',
@@ -1719,7 +1742,7 @@ SETTINGS_TEXT = {'en': {'display': u'Carousel and cards',
     'rowsTooltip': u'Choose the number of vehicle rows. Automatic mode adapts the row count to the number of matching vehicles.',
     'auto': u'Automatic',
     'sortingCriteria': u'Sort criteria',
-    'sortingCriteriaTooltip': u'Configure multiple sorting rules as a hierarchy. The first value is primary, followed by tie-breakers. HCC panel buttons set only one rule at a time. Supported values: nation, type, level, maxBattleTier, premium, battles, winRate, markOfMastery, damageRating, marksOnGun, battlePassPoints, lastPlayed. Prefix a value with - to reverse its order (example: -battles).',
+    'sortingCriteriaTooltip': u'Configure multiple sorting rules as a hierarchy. The first value is primary, followed by tie-breakers. HCC panel buttons set one rule at a time. Supported values: nation, type, level, maxBattleTier, premium, battles, winRate, markOfMastery, averageDamage, alphaDamage, marksOnGun, battlePassPoints, lastPlayed. Prefix a value with - to reverse its order (examples: -averageDamage, -alphaDamage).',
     'nationsOrder': u'Nation order',
     'nationsOrderTooltip': u'Comma-separated nation priority, for example: ussr, germany, usa, china, france, uk, japan, czech, poland, sweden, italy.',
     'typesOrder': u'Type order',
