@@ -25,7 +25,6 @@ from gui.impl.lobby.hangar.presenters.vehicle_statistics_presenter import Vehicl
 from gui.impl.lobby.hangar.presenters.vehicle_playlists_presenter import VehiclePlaylistsPresenter
 from gui.impl.lobby.tooltips.carousel_vehicle_tooltip import CarouselVehicleTooltipView
 from gui.shared.items_parameters import params_helper as items_params_helper
-from gui.shared.utils.requesters import REQ_CRITERIA
 from gui.veh_post_progression.models.progression import PostProgressionCompletion
 from helpers import dependency
 from openwg_gameface import gf_mod_inject
@@ -583,6 +582,14 @@ def _refresh_native_vehicle_model():
         LOGGER.debug('Unable to refresh native vehicle model')
 
 
+def _refresh_models():
+    for model in list(MODELS):
+        try:
+            model.refresh()
+        except Exception:
+            LOGGER.exception('Unable to refresh HCC model after native provider loading')
+
+
 def _sync_sort_property():
     """Sync sorting configuration to all models."""
     sort_json = _build_sort_json()
@@ -635,12 +642,12 @@ def _set_carousel_rows(rows, automatic=False):
 
 
 def _inventory_vehicles():
-    criteria = REQ_CRITERIA.INVENTORY | REQ_CRITERIA.VEHICLE.ACTIVE_IN_NATION_GROUP
-    try:
-        return SERVICES.itemsCache.items.getVehicles(criteria)
-    except Exception as e:
-        LOGGER.warning('Failed to get inventory vehicles: %s', e)
-        return {}
+    for provider in list(FILTER_PROVIDERS):
+        provider_vehicles = getattr(provider, 'vehicles', None)
+        if isinstance(provider_vehicles, dict):
+            return provider_vehicles
+    LOGGER.warning('Native vehicle provider unavailable; skipping payload build')
+    return {}
 
 def _marks_on_gun(vehicle_dossier):
     try:
@@ -1570,6 +1577,7 @@ def _patch_vehicle_filters_provider():
         if _is_frontline_filter(self):
             return result
         _add_safe_provider(FILTER_PROVIDERS, self, max_size=50)
+        _register_callback(0.1, _refresh_models)
         try:
             with self.viewModel.transaction() as model:
                 model.setHccCarouselAuto(_carousel_auto())
