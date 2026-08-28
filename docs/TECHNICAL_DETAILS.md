@@ -53,7 +53,7 @@ Supported filter IDs:
 - non_elite
 - not_ready
 - marks_incomplete
-- crew_not_maxed
+- crew_not_maxed (matches vehicles whose currently assigned crew is not fully trained for that vehicle according to the client crew state)
 
 ### Advanced Hierarchical Sorting
 

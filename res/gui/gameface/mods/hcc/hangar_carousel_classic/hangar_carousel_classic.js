@@ -12,7 +12,7 @@ const LABELS = {
     filter_non_elite: "Non-elite tanks",
     filter_not_ready: "Broken / crew incomplete",
     filter_marks_incomplete: "Marks incomplete (Tier V+)",
-    filter_crew_not_maxed: "Crew level below 75%",
+    filter_crew_not_maxed: "Crew not fully trained",
     sort_default: "Default order",
     sort_battles: "Battles",
     sort_winRate: "Win rate",

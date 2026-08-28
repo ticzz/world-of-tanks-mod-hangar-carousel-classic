@@ -1194,19 +1194,7 @@ def _matches(filter_id, vehicle):
             return False
     elif filter_id == 'crew_not_maxed':
         try:
-            vehicle_dossier = SERVICES.itemsCache.items.getVehicleDossier(vehicle.intCD)
-            if vehicle_dossier is None:
-                return False
-            total_stats = vehicle_dossier.getTotalStats()
-            if total_stats is None:
-                return False
-            crew_stats = total_stats.getCrewStats() if hasattr(total_stats, 'getCrewStats') else None
-            if crew_stats is None:
-                return False
-            avg_level = crew_stats.getAverageLevel() if hasattr(crew_stats, 'getAverageLevel') else None
-            if avg_level is None:
-                return False
-            return avg_level < 75
+            return not bool(getattr(vehicle, 'isCrewFullyTrained', True))
         except Exception:
             return False
     return False
@@ -1694,13 +1682,21 @@ SETTINGS_TEXT = {'en': {'display': u'Carousel and cards',
     'filtering': u'Filtering',
     'filteringTooltip': u'Enable or disable filtering. Individual filters can be toggled here in MSA or in the HCC filter panel. HCC changes synchronize the MSA values and vehicle list; MSA changes synchronize the HCC panel and vehicle list.',
     'filterBonus': u'Bonus crew XP',
+    'filterBonusTooltip': u'Show only vehicles with an active daily crew-XP bonus [x2/x5] (daily XP multiplier greater than 1).',
     'filterFavorite': u'Favorite tanks',
+    'filterFavoriteTooltip': u'Show only vehicles marked as favorite in the game client.',
     'filterElite': u'Elite tanks',
+    'filterEliteTooltip': u'Show only vehicles that have elite status.',
     'filterPremium': u'Premium tanks',
+    'filterPremiumTooltip': u'Show only premium vehicles.',
     'filterNonElite': u'Non-elite tanks',
+    'filterNonEliteTooltip': u'Show only vehicles that do not have elite status.',
     'filterNotReady': u'Broken / crew incomplete',
+    'filterNotReadyTooltip': u'Show only vehicles that are broken, have an incomplete crew, or do not have a full ammunition load.',
     'filterMarksIncomplete': u'Marks incomplete (Tier V+)',
-    'filterCrewNotMaxed': u'Crew level below 75%',
+    'filterMarksIncompleteTooltip': u'Show only Tier V or higher vehicles with less than three Marks of Excellence.',
+    'filterCrewNotMaxed': u'Crew not fully trained',
+    'filterCrewNotMaxedTooltip': u'Show only vehicles whose currently assigned crew is not fully trained for that vehicle, according to the client crew state.',
     'sorting': u'Sorting',
     'sortingTooltip': u'Enable or disable HCC sorting. The buttons in the HCC panel set one sorting rule at a time. Use the MSA Sort criteria field below to configure multiple rules as a hierarchy.',
     'cardStatsFields': u'Card statistics fields',
@@ -1771,26 +1767,24 @@ def _register_settings():
          u'4'], rows_value, tooltip=_settings_tooltip(text['rows'], text['rowsTooltip']))]
         
         filter_settings = (
-            ('bonus', 'filterBonus'),
-            ('favorite', 'filterFavorite'),
-            ('elite', 'filterElite'),
-            ('premium', 'filterPremium'),
-            ('non_elite', 'filterNonElite'),
-            ('not_ready', 'filterNotReady'),
-            ('marks_incomplete', 'filterMarksIncomplete'),
-            ('crew_not_maxed', 'filterCrewNotMaxed')
+            ('bonus', 'filterBonus', 'filterBonusTooltip'),
+            ('favorite', 'filterFavorite', 'filterFavoriteTooltip'),
+            ('elite', 'filterElite', 'filterEliteTooltip'),
+            ('premium', 'filterPremium', 'filterPremiumTooltip'),
+            ('non_elite', 'filterNonElite', 'filterNonEliteTooltip'),
+            ('not_ready', 'filterNotReady', 'filterNotReadyTooltip'),
+            ('marks_incomplete', 'filterMarksIncomplete', 'filterMarksIncompleteTooltip'),
+            ('crew_not_maxed', 'filterCrewNotMaxed', 'filterCrewNotMaxedTooltip')
         )
-        filter_controls = [templates.createLabel(text['filtering'], tooltip=_settings_tooltip(text['filtering'], text['filteringTooltip'])),
-         templates.createCheckbox(text['filtering'], 'filteringEnabled', filtering_enabled,
-                                  tooltip=_settings_tooltip(text['filtering'], text['filteringTooltip']))]
-        for filter_id, text_key in filter_settings:
+        filter_controls = [templates.createLabel(text['filtering']),
+         templates.createCheckbox(text['filtering'], 'filteringEnabled', bool(filtering.get('enabled', True)))]
+        for filter_id, text_key, tooltip_key in filter_settings:
             filter_controls.append(templates.createCheckbox(
                 text[text_key], 'filter_%s' % filter_id, filter_id in ACTIVE_FILTERS,
-                tooltip=_settings_tooltip(text[text_key], text['filteringTooltip'])))
+                tooltip=_settings_tooltip(text[text_key], text[tooltip_key])))
         column2 = filter_controls + [
-         templates.createLabel(text['sorting'], tooltip=_settings_tooltip(text['sorting'], text['sortingTooltip'])),
-         templates.createCheckbox(text['sorting'], 'sortingEnabled', sorting_enabled,
-                                  tooltip=_settings_tooltip(text['sorting'], text['sortingTooltip'])),
+         templates.createLabel(text['sorting']),
+         templates.createCheckbox(text['sorting'], 'sortingEnabled', bool(sorting.get('enabled', True))),
          templates.createInput(text['sortingCriteria'], 'sortingCriteria', criteria_str, tooltip=_settings_tooltip(text['sortingCriteria'], text['sortingCriteriaTooltip'])),
          templates.createInput(text['nationsOrder'], 'nationsOrder', nations_str, tooltip=_settings_tooltip(text['nationsOrder'], text['nationsOrderTooltip'])),
          templates.createInput(text['typesOrder'], 'typesOrder', types_str, tooltip=_settings_tooltip(text['typesOrder'], text['typesOrderTooltip'])),
