@@ -576,6 +576,7 @@ def _refresh_native_vehicle_model():
         for provider in list(FILTER_PROVIDERS):
             try:
                 provider._VehicleFiltersDataProvider__updateVehicles()
+                provider._VehicleFiltersDataProvider__updateCarousel()
             except Exception:
                 LOGGER.debug('Unable to refresh filter provider')
     except Exception:
@@ -1777,14 +1778,16 @@ def _register_settings():
             ('crew_not_maxed', 'filterCrewNotMaxed', 'filterCrewNotMaxedTooltip')
         )
         filter_controls = [templates.createLabel(text['filtering']),
-         templates.createCheckbox(text['filtering'], 'filteringEnabled', bool(filtering.get('enabled', True)))]
+         templates.createCheckbox(text['filtering'], 'filteringEnabled', filtering_enabled,
+                                  tooltip=_settings_tooltip(text['filtering'], text['filteringTooltip']))]
         for filter_id, text_key, tooltip_key in filter_settings:
             filter_controls.append(templates.createCheckbox(
                 text[text_key], 'filter_%s' % filter_id, filter_id in ACTIVE_FILTERS,
                 tooltip=_settings_tooltip(text[text_key], text[tooltip_key])))
         column2 = filter_controls + [
          templates.createLabel(text['sorting']),
-         templates.createCheckbox(text['sorting'], 'sortingEnabled', bool(sorting.get('enabled', True))),
+         templates.createCheckbox(text['sorting'], 'sortingEnabled', sorting_enabled,
+                                  tooltip=_settings_tooltip(text['sorting'], text['sortingTooltip'])),
          templates.createInput(text['sortingCriteria'], 'sortingCriteria', criteria_str, tooltip=_settings_tooltip(text['sortingCriteria'], text['sortingCriteriaTooltip'])),
          templates.createInput(text['nationsOrder'], 'nationsOrder', nations_str, tooltip=_settings_tooltip(text['nationsOrder'], text['nationsOrderTooltip'])),
          templates.createInput(text['typesOrder'], 'typesOrder', types_str, tooltip=_settings_tooltip(text['typesOrder'], text['typesOrderTooltip'])),
