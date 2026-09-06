@@ -28,13 +28,13 @@ For instance, you might place it in a path like `G:/Games/World_of_Tanks_EU/mods
 - Additionally, you'll need to install the corresponding `net.openwg.gameface_*.wotmod` file, 
 which can be found in the [OpenWG Gameface releases](https://gitlab.com/openwg/wot.gameface/-/releases), also into your client mods folder.
 
-- Launch the game. Use the native carousel filter popover to toggle vehicle filters. ModsSettingsAPI is optional and provides carousel, card, sorting, and action-card settings. (It is included in the full package.)
+- Launch the game. Use the native carousel filter popover to toggle vehicle filters. Mod Menu is optional and provides carousel, card, sorting, and action-card settings. (It is included in the full package.)
 
-- Please be aware that net.openwg.gameface is essential for injecting the carousel's user interface. The ModsSettingsAPI is optional and is solely used for accessing the in-game settings menu.
+- Please be aware that net.openwg.gameface is essential for injecting the carousel's user interface. Mod Menu is optional and is solely used for accessing the in-game settings menu.
 
 ## Full Package Installation
 
-- If you choose the complete package, [hangar_carousel_classic_1.0.11_full.zip](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.11/hangar_carousel_classic_1.0.11_full.zip) includes the carousel mod, `net.openwg.gameface`, and `ModsSettingsAPI`, all organized within `mods/2.4.0.0/`. Extract the contents directly into the World of Tanks installation directory.
+- If you choose the complete package, [hangar_carousel_classic_1.0.11_full.zip](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.11/hangar_carousel_classic_1.0.11_full.zip) includes the carousel mod, `net.openwg.gameface`, and `Mod Menu`, all organized within `mods/2.4.0.0/`. Extract the contents directly into the World of Tanks installation directory.
 
 ## Build Locally
 

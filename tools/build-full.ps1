@@ -66,7 +66,7 @@ $modsRootFromClient = Join-Path $resolvedRoot.Root ("mods\$modsVersion")
 $distModsRoot = Join-Path $repo 'dist\mods'
 $resolvedVersion = $modsVersion
 $dependencyRoots = @($modsRootFromClient)
-foreach ($candidate in @('2.3.1.3', '2.3.1.2')) {
+foreach ($candidate in @('2.4.0.0', '2.3.1.3', '2.3.1.2')) {
     $candidatePath = Join-Path $distModsRoot $candidate
     if (Test-Path -LiteralPath $candidatePath) {
         $dependencyRoots += $candidatePath
@@ -74,27 +74,27 @@ foreach ($candidate in @('2.3.1.3', '2.3.1.2')) {
 }
 
 $dependencies = $null
-$settingsApi = $null
+$modMenu = $null
 $gameface = $null
 foreach ($root in ($dependencyRoots | Select-Object -Unique)) {
-    $candidateSettings = Join-Path $root 'aslain.modssettingsapi_1.7.1.wotmod'
+    $candidateModMenu = Join-Path $root 'aslain.modmenu_2.0.07.wotmod'
     $candidateGameface = Join-Path $root 'net.openwg\net.openwg.gameface_1.1.6.wotmod'
-    if ((Test-Path -LiteralPath $candidateSettings) -and (Test-Path -LiteralPath $candidateGameface)) {
+    if ((Test-Path -LiteralPath $candidateModMenu) -and (Test-Path -LiteralPath $candidateGameface)) {
         $dependencies = $root
-        $settingsApi = $candidateSettings
+        $modMenu = $candidateModMenu
         $gameface = $candidateGameface
         break
     }
 }
 if (-not $dependencies) {
-    throw "No supported dependency bundle found using actual client path or dist\mods. Expected aslain.modssettingsapi_1.7.1.wotmod and net.openwg.gameface_1.1.6.wotmod."
+    throw "No supported dependency bundle found using actual client path or dist\mods. Expected aslain.modmenu_2.0.07.wotmod and net.openwg.gameface_1.1.6.wotmod."
 }
 
 $releaseRoot = Join-Path $repo ('build\release-{0}-full' -f $Version)
 $modsRoot = Join-Path $releaseRoot ("mods\$resolvedVersion")
 $outputPath = Join-Path $repo ('dist\hangar_carousel_classic_{0}_full.zip' -f $Version)
 
-foreach ($source in @($PackagePath, $settingsApi, $gameface)) {
+foreach ($source in @($PackagePath, $modMenu, $gameface)) {
     if (-not (Test-Path -LiteralPath $source)) {
         throw "Fullpack dependency is missing: $source"
     }
@@ -103,7 +103,7 @@ foreach ($source in @($PackagePath, $settingsApi, $gameface)) {
 Remove-Item -LiteralPath $releaseRoot -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path (Join-Path $modsRoot 'net.openwg') | Out-Null
 Copy-Item -LiteralPath $PackagePath -Destination (Join-Path $modsRoot ([IO.Path]::GetFileName($PackagePath)))
-Copy-Item -LiteralPath $settingsApi -Destination (Join-Path $modsRoot ([IO.Path]::GetFileName($settingsApi)))
+Copy-Item -LiteralPath $modMenu -Destination (Join-Path $modsRoot ([IO.Path]::GetFileName($modMenu)))
 Copy-Item -LiteralPath $gameface -Destination (Join-Path $modsRoot 'net.openwg\net.openwg.gameface_1.1.6.wotmod')
 
 Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
@@ -115,7 +115,7 @@ $archive = [IO.Compression.ZipFile]::OpenRead($outputPath)
 try {
     $required = @(
         ("mods/$resolvedVersion/" + [IO.Path]::GetFileName($PackagePath)),
-        "mods/$resolvedVersion/aslain.modssettingsapi_1.7.1.wotmod",
+        "mods/$resolvedVersion/aslain.modmenu_2.0.07.wotmod",
         "mods/$resolvedVersion/net.openwg/net.openwg.gameface_1.1.6.wotmod"
     )
     $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
