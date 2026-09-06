@@ -1334,6 +1334,10 @@ def _apply_msa_filter_settings(settings):
 def _build_payload():
     global LAST_DATA_SUMMARY, DOSSIER_FETCH_COUNTER
     DOSSIER_FETCH_COUNTER = 0  # Reset fetch counter for this refresh cycle
+    # Outside the standard hangar the JS layer only needs the inactive flag to
+    # drop its global decorations. Skip the expensive dossier/stats build.
+    if not _is_hangar_context_active():
+        return {'version': MOD_VERSION, 'enabled': False, 'hangarActive': False}
     try:
         vehicles = _inventory_vehicles()
     except Exception as e:
