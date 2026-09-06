@@ -89,18 +89,27 @@ try {
         $nativeReader.Dispose()
         $nativeStream.Dispose()
     }
-    if (-not $nativeSource.Contains('t+=i)e.push(j.slice(t,t+i))')) {
+    if (-not (
+            $nativeSource.Contains('t+=v)e.push(j.slice(t,t+v))') -or
+            $nativeSource.Contains('t+=i)e.push(j.slice(t,t+i))')
+        )) {
         throw 'Native carousel bundle does not contain the generic row chunker.'
     }
     if ($nativeSource.Contains('totalElements:2===v?N.length:w.length')) {
         throw 'Native carousel bundle still contains the two-row-only renderer.'
     }
-    if (-not $nativeSource.Contains('3===s&&"hcc-native-carousel--3",4===s&&"hcc-native-carousel--4"')) {
+    if (-not (
+            $nativeSource.Contains('3===s&&"hcc-native-carousel--3",4===s&&"hcc-native-carousel--4"') -or
+            $nativeSource.Contains('3===v&&"hcc-native-carousel--3",4===v&&"hcc-native-carousel--4"')
+        )) {
         throw 'Native carousel bundle does not expose the three- and four-row height classes.'
     }
     if (-not $nativeSource.Contains('hccSortJson') -or
         -not $nativeSource.Contains('const hcc=') -or
-        -not $nativeSource.Contains('hccCarouselAuto:i.hccCarouselAuto')) {
+        -not (
+            $nativeSource.Contains('hccCarouselAuto:i.hccCarouselAuto') -or
+            $nativeSource.Contains('hccCarouselAuto:r.hccCarouselAuto')
+        )) {
         throw 'Native carousel bundle does not contain Classic sorting support.'
     }
 

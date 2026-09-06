@@ -21,11 +21,10 @@ $cssPackagePath = Join-Path $GameRoot 'res\packages\gui-part2.pkg'
 $bundleEntryPath = 'gui/gameface/_dist/production/mono/hangar/views/vehicle_tooltip/vehicle_tooltip.html/bundle.js'
 $cssEntryPath = 'gui/gameface/_dist/production/mono/hangar/vehicle_tooltip/vehicle_tooltip.css'
 $supportedBundleHashes = @(
-    'B1CBC96E18174947F5CC83E46A5511924DA9D7AEF139DFA8CB75AA79B366DA4E', # WoT 2.3.1.0
-    '66AACCC3D55B62EFC6264359F133D51F04270A8E7E737FE1BB2FFB6461ECC1E4'  # WoT 2.3.1.1
+    '9E3C202258E9182E2788BAD4B09C3EDA969AB8F5A73A08CAA6A2B7E377C342C5'  # WoT 2.4.0.0
 )
 $supportedCssHashes = @(
-    '4D9D45F739F642F5CCD443386722045F319EC873352B159B36BAEA210249D822'  # WoT 2.3.1.0
+    'FED446477AD05AFC9556AC3FD92DF45573E8F9121466A562105BAAF695C61726'  # WoT 2.4.0.0
 )
 
 Add-Type -AssemblyName System.IO.Compression

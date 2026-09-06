@@ -6,10 +6,7 @@ const LABELS = {
     filters: "HCC filters",
     filter_count_description: "ALL shows the vehicles matching every active filter; each filter count shows the matching vehicles within that current selection.",
     filter_all: "All vehicles",
-    filter_bonus: "Bonus crew XP",
     filter_favorite: "Favorite tanks",
-    filter_elite: "Elite tanks",
-    filter_premium: "Premium tanks",
     filter_non_elite: "Non-elite tanks",
     filter_not_ready: "Broken / crew incomplete",
     filter_marks_incomplete: "Marks incomplete (Tier V+)",
@@ -53,6 +50,28 @@ const SORT_DIRECTION_ICONS = {
   descending: "v",
   ascending: "^"
 };
+
+const FILTER_SVG_NS = "http://www.w3.org/2000/svg";
+
+const FILTER_ICONS = {
+  all: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  favorite: '<path d="M12 3.5l2.47 5.13 5.53.82-4 3.98.94 5.57L12 16.4l-4.94 2.6.94-5.57-4-3.98 5.53-.82L12 3.5z"/>',
+  non_elite: '<rect x="12" y="4.2" width="11" height="11" rx="1.5" transform="rotate(45 12 12)"/>',
+  not_ready: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+  marks_incomplete: '<circle cx="12" cy="8" r="5.2"/><path d="M8.4 12.9L7 21l5-2.8L17 21l-1.4-8.1"/>',
+  crew_not_maxed: '<circle cx="12" cy="8" r="3.2"/><path d="M5.5 20c0-3.6 2.9-6.2 6.5-6.2s6.5 2.6 6.5 6.2"/>'
+};
+
+function setButtonIcon(button, filterId) {
+  while (button.firstChild) {
+    button.removeChild(button.firstChild);
+  }
+  const svg = document.createElementNS(FILTER_SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.innerHTML = FILTER_ICONS[filterId] || FILTER_ICONS.all;
+  button.appendChild(svg);
+}
 
 let state = { stats: {}, statsConfig: {}, filtering: {}, sorting: {}, actionCards: {}, carousel: { rows: 2 }, filters: [], activeFilters: [], enabled: false };
 let lastStateJson = "";
@@ -378,7 +397,13 @@ function renderNativeFilterPanel() {
       const active = filterId === "all" ? activeFilters.size === 0 : activeFilters.has(filterId);
       if (active) button.classList.add("hcc-native-filter--active");
       const title = labels()[`filter_${filterId}`] || filterId;
-      button.textContent = filterId === "all" ? "ALL" : String(filter.count || 0);
+      setButtonIcon(button, filterId);
+      if (filterId !== "all") {
+        const badge = document.createElement("span");
+        badge.className = "hcc-native-filter-badge";
+        badge.textContent = String(filter.count || 0);
+        button.appendChild(badge);
+      }
       button.setAttribute("aria-label", title);
       button.setAttribute("aria-pressed", String(active));
       button.title = title;

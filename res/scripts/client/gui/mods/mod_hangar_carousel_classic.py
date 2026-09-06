@@ -10,12 +10,13 @@ import io
 import json
 import logging
 import os
+import random
 import time
 import zipfile
 import BigWorld
 import BattleReplay
 from PlayerEvents import g_playerEvents
-from helpers import getClientLanguage
+from helpers import getClientLanguage, getPreferencesDirPath
 from dossiers2.ui.achievements import MARK_ON_GUN_RECORD
 from frameworks.wulf import ViewModel
 from gui.impl.gen.view_models.views.lobby.hangar.sub_views.vehicle_filter_model import VehicleFilterModel
@@ -36,12 +37,12 @@ try:
 except Exception:
     carousel_filter_module = None
 MOD_ID = 'mod_hangar_carousel_classic'
-MOD_VERSION = '1.0.10'
+MOD_VERSION = '1.0.11'
 MOD_LINKAGE_ID = 'mod_hangar.carousel.classic'
 PLAYLIST_ID_PREFIX = 'mhcc_'
-APPDATA_ROOT = os.environ.get('APPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming'))
-CONFIG_PATH = os.path.join(APPDATA_ROOT, 'Wargaming.net', 'WorldOfTanks', 'mods', 'mod_hangar_carousel_classic', 'config.json')
-RUNTIME_PATH = os.path.join(APPDATA_ROOT, 'Wargaming.net', 'WorldOfTanks', 'mods', 'mod_hangar_carousel_classic', 'runtime.json')
+PREFERENCES_DIR = getPreferencesDirPath()
+CONFIG_PATH = os.path.join(PREFERENCES_DIR, 'mods', 'mod_hangar_carousel_classic', 'config.json')
+RUNTIME_PATH = os.path.join(PREFERENCES_DIR, 'mods', 'mod_hangar_carousel_classic', 'runtime.json')
 LEGACY_CONFIG_PATH = os.path.join('res_mods', 'configs', 'hangar_carousel_classic', 'config.json')
 LEGACY_RUNTIME_PATH = os.path.join('res_mods', 'configs', 'hangar_carousel_classic', 'runtime.json')
 JS_URL = 'coui://gui/gameface/mods/hcc/hangar_carousel_classic/hangar_carousel_classic.js'
@@ -53,20 +54,20 @@ NATIVE_RESOURCE_HASHES = (
         ('res/packages/gui-part3.pkg', 'gui/gameface/_dist/production/mono/hangar/views/main/main.html/bundle.js',
          ('753102BFFDFE1A52B23706606F804CAC236463CB1A827A0EA3449E1D263FC6CE',
             '21B48CFFF0EDA9247413338CBEF3EDC2DD7BE0D1B6504F67AF05E163A22DF1A6',
-            '21C58DA5788BDDF31655B3510B027505A2418355D299D50773E6F414F28779D0')),
+            '21C58DA5788BDDF31655B3510B027505A2418355D299D50773E6F414F28779D0',
+            '98D4D4060C141B5728F9126E4B43AD9E0E0BD6BA3FC72E14156391DB54737FBA')),
         ('res/packages/gui-part4.pkg', 'gui/gameface/_dist/production/mono/hangar/views/vehicle_tooltip/vehicle_tooltip.html/bundle.js',
          ('B1CBC96E18174947F5CC83E46A5511924DA9D7AEF139DFA8CB75AA79B366DA4E',
-            '66AACCC3D55B62EFC6264359F133D51F04270A8E7E737FE1BB2FFB6461ECC1E4')),
+            '66AACCC3D55B62EFC6264359F133D51F04270A8E7E737FE1BB2FFB6461ECC1E4',
+            '9E3C202258E9182E2788BAD4B09C3EDA969AB8F5A73A08CAA6A2B7E377C342C5')),
         ('res/packages/gui-part2.pkg', 'gui/gameface/_dist/production/mono/hangar/vehicle_tooltip/vehicle_tooltip.css',
-         ('4D9D45F739F642F5CCD443386722045F319EC873352B159B36BAEA210249D822',))
+         ('4D9D45F739F642F5CCD443386722045F319EC873352B159B36BAEA210249D822',
+            'FED446477AD05AFC9556AC3FD92DF45573E8F9121466A562105BAAF695C61726'))
 )
 DEFAULT_CONFIG = {'schemaVersion': 5,
  'enabled': True,
  'filtering': {'enabled': True},
- 'tankfilters': {'bonus': {'enabled': True},
-                 'favorite': {'enabled': True},
-                 'elite': {'enabled': True},
-                 'premium': {'enabled': True},
+ 'tankfilters': {'favorite': {'enabled': True},
                  'non_elite': {'enabled': False},
                  'not_ready': {'enabled': False},
                  'marks_incomplete': {'enabled': False},
@@ -105,7 +106,7 @@ class _Services(object):
 
 
 SERVICES = _Services()
-FILTER_ORDER = ('all', 'bonus', 'favorite', 'elite', 'premium', 'non_elite', 'not_ready', 'marks_incomplete', 'crew_not_maxed')
+FILTER_ORDER = ('all', 'favorite', 'non_elite', 'not_ready', 'marks_incomplete', 'crew_not_maxed')
 SORT_CRITERIA_ORDER = ('nation', 'type', 'level', '-level', 'maxBattleTier', '-maxBattleTier', 'premium', '-premium',
                        'battles', '-battles', 'winRate', '-winRate', 'markOfMastery', '-markOfMastery',
                        'averageDamage', '-averageDamage', 'alphaDamage', '-alphaDamage', 'marksOnGun', '-marksOnGun',
@@ -337,6 +338,14 @@ SETTINGS_REGISTERED = False
 MSA_API = None
 MSA_SETTINGS = {}
 MSA_SYNCING = False
+SETTINGS_REGISTRATION_STATE = {
+    'tries': 0,
+    'delay': 0.35,
+    'maxDelay': 8.0,
+    'maxTries': 20,
+    'unavailableLogged': False,
+    'exhaustedLogged': False
+}
 DOSSIER_CACHE = {}
 DOSSIER_CACHE_GENERATION = 0
 DOSSIER_FETCH_COUNTER = 0
@@ -1185,14 +1194,8 @@ def _matches(filter_id, vehicle):
     """Check if vehicle matches the given filter."""
     if filter_id == 'all':
         return True
-    elif filter_id == 'bonus':
-        return bool(getattr(vehicle, 'dailyXPFactor', 1.0) > 1.0)
     elif filter_id == 'favorite':
         return bool(getattr(vehicle, 'isFavorite', False))
-    elif filter_id == 'elite':
-        return bool(getattr(vehicle, 'isElite', False))
-    elif filter_id == 'premium':
-        return bool(getattr(vehicle, 'isPremium', False))
     elif filter_id == 'non_elite':
         return not bool(getattr(vehicle, 'isElite', False))
     elif filter_id == 'not_ready':
@@ -1713,14 +1716,8 @@ def _settings_tooltip(title, body):
 SETTINGS_TEXT = {'en': {'display': u'Carousel and cards',
     'filtering': u'Filtering',
     'filteringTooltip': u'Enable or disable filtering. Individual filters can be toggled here in MSA or in the HCC filter panel. Counts use the current native vehicle list: ALL shows vehicles matching every active filter, and each filter count shows matching vehicles within that current selection. HCC changes synchronize the MSA values and vehicle list; MSA changes synchronize the HCC panel and vehicle list.',
-    'filterBonus': u'Bonus crew XP',
-    'filterBonusTooltip': u'Show only vehicles with an active daily crew-XP bonus [x2/x5] (daily XP multiplier greater than 1).',
     'filterFavorite': u'Favorite tanks',
     'filterFavoriteTooltip': u'Show only vehicles marked as favorite in the game client.',
-    'filterElite': u'Elite tanks',
-    'filterEliteTooltip': u'Show only vehicles that have elite status.',
-    'filterPremium': u'Premium tanks',
-    'filterPremiumTooltip': u'Show only premium vehicles.',
     'filterNonElite': u'Non-elite tanks',
     'filterNonEliteTooltip': u'Show only vehicles that do not have elite status.',
     'filterNotReady': u'Broken / crew incomplete',
@@ -1756,12 +1753,59 @@ SETTINGS_TEXT = {'en': {'display': u'Carousel and cards',
     'restart': u'Changes are applied immediately; restart the client after changing the master switch.'}}
 
 
+def _resolve_mods_settings_api():
+    try:
+        from gui.aslainMenu import g_modsSettingsApi, templates
+        return g_modsSettingsApi, templates
+    except Exception:
+        pass
+    try:
+        from gui.modsSettingsApi import g_modsSettingsApi, templates
+        return g_modsSettingsApi, templates
+    except ImportError:
+        return None, None
+
+
+def _schedule_settings_registration():
+    state = SETTINGS_REGISTRATION_STATE
+    if SETTINGS_REGISTERED or int(state.get('tries', 0)) >= int(state.get('maxTries', 20)):
+        if not SETTINGS_REGISTERED and not state.get('exhaustedLogged'):
+            state['exhaustedLogged'] = True
+            LOGGER.warning('ModsSettingsApi unavailable after %d attempts; settings panel not registered',
+                           int(state.get('tries', 0)))
+        return
+    current_delay = float(state.get('delay', 0.35))
+    jitter = random.uniform(0.0, max(0.05, current_delay * 0.3))
+    _register_callback(min(current_delay + jitter, float(state.get('maxDelay', 8.0))), _register_settings)
+    state['delay'] = min(max(0.35, current_delay * 1.6), float(state.get('maxDelay', 8.0)))
+
+
+def _set_mods_settings_template(g_mods_settings_api, template):
+    try:
+        g_mods_settings_api.setModTemplate(MOD_LINKAGE_ID, template, _on_settings_changed)
+        return
+    except TypeError:
+        try:
+            g_mods_settings_api.setModTemplate(MOD_LINKAGE_ID, template, _on_settings_changed, None)
+            return
+        except TypeError:
+            g_mods_settings_api.setModTemplate(MOD_LINKAGE_ID, template)
+
+
 def _register_settings():
     global SETTINGS_REGISTERED, MSA_API, MSA_SETTINGS
     if SETTINGS_REGISTERED:
         return
+    state = SETTINGS_REGISTRATION_STATE
+    state['tries'] = int(state.get('tries', 0)) + 1
     try:
-        from gui.modsSettingsApi import g_modsSettingsApi, templates
+        g_mods_settings_api, templates = _resolve_mods_settings_api()
+        if g_mods_settings_api is None or templates is None:
+            if not state.get('unavailableLogged'):
+                state['unavailableLogged'] = True
+                LOGGER.info('ModsSettingsApi not available yet; retrying settings registration')
+            _schedule_settings_registration()
+            return
         text = SETTINGS_TEXT['en']
         
         # Current config values
@@ -1799,10 +1843,7 @@ def _register_settings():
          u'4'], rows_value, tooltip=_settings_tooltip(text['rows'], text['rowsTooltip']))]
         
         filter_settings = (
-            ('bonus', 'filterBonus', 'filterBonusTooltip'),
             ('favorite', 'filterFavorite', 'filterFavoriteTooltip'),
-            ('elite', 'filterElite', 'filterEliteTooltip'),
-            ('premium', 'filterPremium', 'filterPremiumTooltip'),
             ('non_elite', 'filterNonElite', 'filterNonEliteTooltip'),
             ('not_ready', 'filterNotReady', 'filterNotReadyTooltip'),
             ('marks_incomplete', 'filterMarksIncomplete', 'filterMarksIncompleteTooltip'),
@@ -1836,15 +1877,16 @@ def _register_settings():
          'column1': column1,
          'column2': column2}
         # ModsSettingsAPI auto-deregisters callback on mod unload; no manual deregister needed
-        g_modsSettingsApi.setModTemplate(MOD_LINKAGE_ID, template, _on_settings_changed)
-        MSA_API = g_modsSettingsApi
-        saved_settings = g_modsSettingsApi.getModSettings(MOD_LINKAGE_ID, template)
+        _set_mods_settings_template(g_mods_settings_api, template)
+        MSA_API = g_mods_settings_api
+        saved_settings = g_mods_settings_api.getModSettings(MOD_LINKAGE_ID, template)
         if isinstance(saved_settings, dict):
             MSA_SETTINGS = dict(saved_settings)
         SETTINGS_REGISTERED = True
         LOGGER.info('ModsSettingsAPI integration registered (sorting + 8 filters)')
     except Exception:
         LOGGER.exception('Unable to register ModsSettingsAPI integration')
+        _schedule_settings_registration()
 
 
 def _on_settings_changed(linkage, settings):
