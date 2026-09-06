@@ -28,7 +28,7 @@ const LABELS = {
     carousel_rows: "Carousel rows",
     carousel_rows_description: "Number of vehicle rows displayed in the hangar carousel.",
     carousel_auto: "Automatic rows",
-    carousel_auto_description: "Uses 1 row for up to 8 matching vehicles, 2 for up to 16, 3 for up to 24, and 4 above 24.",
+    carousel_auto_description: "Uses native WoT rows for up to 16 matching vehicles, 3 rows for up to 24, and 4 above 24.",
     ascending: "Ascending",
     descending: "Descending",
     refresh: "Refresh HCC data",
@@ -165,6 +165,13 @@ function clearGlobalDecorations() {
 }
 
 function applyCarouselRowsClass() {
+  if (state.carousel?.mode === "auto" && Number(state.carousel?.rows || 2) <= 2) {
+    for (const root of [document.documentElement, document.body]) {
+      if (!root) continue;
+      root.classList.remove(...CAROUSEL_ROW_CLASSES);
+    }
+    return;
+  }
   const rows = Math.max(1, Math.min(4, Number(state.carousel?.rows || 2)));
   for (const root of [document.documentElement, document.body]) {
     if (!root) continue;

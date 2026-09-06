@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
     <id>hangar.carousel.classic</id>
-    <version>1.0.15</version>
+    <version>1.0.16</version>
     <name>Hangar Carousel Classic</name>
     <description>Restores the classic hangar carousel for World of Tanks 2.x with native Gameface integration, hierarchical sorting, and vehicle card statistics.</description>
 </root>
