@@ -708,9 +708,10 @@ def _set_carousel_rows(rows, automatic=False, refresh=True):
                 _refresh_models_lightweight('carousel row mode unchanged')
             return
         RUNTIME_STATE['carouselRowsMode'] = 'auto'
+        effective_rows = _effective_carousel_rows()
+        RUNTIME_STATE['carouselRows'] = effective_rows
         _save_runtime()
         _sync_carousel_auto_property(True)
-        effective_rows = _effective_carousel_rows()
         for provider in list(FILTER_PROVIDERS):
             try:
                 _set_native_provider_rows(provider, effective_rows)
