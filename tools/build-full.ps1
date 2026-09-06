@@ -3,7 +3,7 @@ param(
     [string]$GameRoot = '',
     [Parameter(Mandatory = $true)]
     [string]$PackagePath,
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $false)]
     [string]$Version
 )
 
@@ -13,6 +13,13 @@ if ([string]::IsNullOrWhiteSpace($PackagePath)) {
 }
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $PackagePath = [IO.Path]::GetFullPath($PackagePath)
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    [xml]$meta = Get-Content -LiteralPath (Join-Path $repo 'meta.xml') -Raw
+    $Version = [string]$meta.root.version
+}
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    throw 'Version is missing from meta.xml; specify -Version explicitly.'
+}
 
 function Resolve-GameRoot {
     param([string]$PreferredRoot)
@@ -66,28 +73,38 @@ $modsRootFromClient = Join-Path $resolvedRoot.Root ("mods\$modsVersion")
 $distModsRoot = Join-Path $repo 'dist\mods'
 $resolvedVersion = $modsVersion
 $dependencyRoots = @($modsRootFromClient)
-foreach ($candidate in @('2.4.0.0', '2.3.1.3', '2.3.1.2')) {
-    $candidatePath = Join-Path $distModsRoot $candidate
-    if (Test-Path -LiteralPath $candidatePath) {
-        $dependencyRoots += $candidatePath
-    }
+if (Test-Path -LiteralPath $distModsRoot) {
+$dependencyRoots += Get-ChildItem -LiteralPath $distModsRoot -Directory |
+    Sort-Object Name -Descending |
+    Select-Object -ExpandProperty FullName
+}
+$dependencyRoots = $dependencyRoots | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Unique
+
+function Select-LatestPackage {
+param([string]$Directory, [string]$Filter)
+
+$packages = @(Get-ChildItem -LiteralPath $Directory -Filter $Filter -File -ErrorAction SilentlyContinue)
+if ($packages.Count -eq 0) {
+    return $null
+}
+return $packages | Sort-Object Name -Descending | Select-Object -First 1
 }
 
 $dependencies = $null
 $modMenu = $null
 $gameface = $null
 foreach ($root in ($dependencyRoots | Select-Object -Unique)) {
-    $candidateModMenu = Join-Path $root 'aslain.modmenu_2.0.07.wotmod'
-    $candidateGameface = Join-Path $root 'net.openwg\net.openwg.gameface_1.1.6.wotmod'
-    if ((Test-Path -LiteralPath $candidateModMenu) -and (Test-Path -LiteralPath $candidateGameface)) {
+    $candidateModMenu = Select-LatestPackage $root 'aslain.modmenu_*.wotmod'
+    $candidateGameface = Select-LatestPackage (Join-Path $root 'net.openwg') 'net.openwg.gameface_*.wotmod'
+    if ($candidateModMenu -and $candidateGameface) {
         $dependencies = $root
-        $modMenu = $candidateModMenu
-        $gameface = $candidateGameface
+        $modMenu = $candidateModMenu.FullName
+        $gameface = $candidateGameface.FullName
         break
     }
 }
 if (-not $dependencies) {
-    throw "No supported dependency bundle found using actual client path or dist\mods. Expected aslain.modmenu_2.0.07.wotmod and net.openwg.gameface_1.1.6.wotmod."
+    throw 'No dependency bundle found. Expected aslain.modmenu_*.wotmod and net.openwg.gameface_*.wotmod in the client mods directory or dist\mods.'
 }
 
 $releaseRoot = Join-Path $repo ('build\release-{0}-full' -f $Version)
@@ -104,7 +121,7 @@ Remove-Item -LiteralPath $releaseRoot -Recurse -Force -ErrorAction SilentlyConti
 New-Item -ItemType Directory -Force -Path (Join-Path $modsRoot 'net.openwg') | Out-Null
 Copy-Item -LiteralPath $PackagePath -Destination (Join-Path $modsRoot ([IO.Path]::GetFileName($PackagePath)))
 Copy-Item -LiteralPath $modMenu -Destination (Join-Path $modsRoot ([IO.Path]::GetFileName($modMenu)))
-Copy-Item -LiteralPath $gameface -Destination (Join-Path $modsRoot 'net.openwg\net.openwg.gameface_1.1.6.wotmod')
+Copy-Item -LiteralPath $gameface -Destination (Join-Path $modsRoot ('net.openwg\' + [IO.Path]::GetFileName($gameface)))
 
 Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
 Add-Type -AssemblyName System.IO.Compression
@@ -115,8 +132,8 @@ $archive = [IO.Compression.ZipFile]::OpenRead($outputPath)
 try {
     $required = @(
         ("mods/$resolvedVersion/" + [IO.Path]::GetFileName($PackagePath)),
-        "mods/$resolvedVersion/aslain.modmenu_2.0.07.wotmod",
-        "mods/$resolvedVersion/net.openwg/net.openwg.gameface_1.1.6.wotmod"
+        ("mods/$resolvedVersion/" + [IO.Path]::GetFileName($modMenu)),
+        ("mods/$resolvedVersion/net.openwg/" + [IO.Path]::GetFileName($gameface))
     )
     $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
     foreach ($entry in $required) {
