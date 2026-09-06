@@ -83,7 +83,6 @@ foreach ($root in ($dependencyRoots | Select-Object -Unique)) {
         $dependencies = $root
         $settingsApi = $candidateSettings
         $gameface = $candidateGameface
-        $resolvedVersion = [IO.Path]::GetFileName($root)
         break
     }
 }
