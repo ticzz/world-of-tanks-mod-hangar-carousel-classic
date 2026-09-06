@@ -24,7 +24,7 @@ Classic-style hangar carousel for World of Tanks 2.x with native Gameface integr
 
 - First, download the most recent version from the [Releases](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases) page.
 - Copy the `.wotmod` file into your World of Tanks client's mods directory. 
-For instance, you might place it in a path like `G:/Games/World_of_Tanks_EU/mods/2.3.1.2/`. 
+For instance, you might place it in a path like `G:/Games/World_of_Tanks_EU/mods/2.4.0.0/`. 
 - Additionally, you'll need to install the corresponding `net.openwg.gameface_*.wotmod` file, 
 which can be found in the [OpenWG Gameface releases](https://gitlab.com/openwg/wot.gameface/-/releases), also into your client mods folder.
 
@@ -34,7 +34,7 @@ which can be found in the [OpenWG Gameface releases](https://gitlab.com/openwg/w
 
 ## Full Package Installation
 
-- If you choose the complete package, [hangar_carousel_classic_1.0.11_full.zip](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.11/hangar_carousel_classic_1.0.11_full.zip) includes the carousel mod, `net.openwg.gameface`, and `ModsSettingsAPI`, all organized within `mods/2.3.1.2/`. Extract the contents directly into the World of Tanks installation directory.
+- If you choose the complete package, [hangar_carousel_classic_1.0.11_full.zip](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.11/hangar_carousel_classic_1.0.11_full.zip) includes the carousel mod, `net.openwg.gameface`, and `ModsSettingsAPI`, all organized within `mods/2.4.0.0/`. Extract the contents directly into the World of Tanks installation directory.
 
 ## Build Locally
 
