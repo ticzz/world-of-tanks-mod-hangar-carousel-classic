@@ -1,4 +1,4 @@
-﻿"""Hangar Carousel Classic bootstrap for the World of Tanks 2.x client.
+"""Hangar Carousel Classic bootstrap for the World of Tanks 2.x client.
 
 The client embeds Python 2.7, so this module deliberately avoids Python 3-only
 syntax. Custom filter predicates narrow the native vehicle-statistics model;
@@ -42,7 +42,7 @@ try:
 except Exception:
     carousel_filter_module = None
 MOD_ID = 'mod_hangar_carousel_classic'
-MOD_VERSION = '1.0.12'
+MOD_VERSION = '1.0.13'
 MOD_LINKAGE_ID = 'mod_hangar.carousel.classic'
 PLAYLIST_ID_PREFIX = 'mhcc_'
 PREFERENCES_DIR = getPreferencesDirPath()
@@ -337,6 +337,8 @@ FILTER_PROVIDERS = []
 STATISTICS_PRESENTERS = []
 CALLBACK_IDS = []
 LAST_DATA_SUMMARY = None
+LAST_PAYLOAD = None
+LAST_PAYLOAD_SIGNATURE = None
 LEGACY_PLAYLISTS_REMOVED = False
 TOOLTIP_PAYLOAD_LOGGED = False
 ALLOWED_HANGAR_PREFIXES = ('spaces/hangar_v4',)
@@ -360,10 +362,22 @@ MAX_DOSSIER_FETCHES_PER_REFRESH = 256
 COMPATIBILITY_WARNING_SHOWN = False
 
 def _register_callback(delay, callback):
+    # BigWorld callbacks are one-shot: once they fire, their id becomes
+    # invalid. Without removing the id here, fini() would try to cancel
+    # already-fired callbacks on shutdown and log spurious warnings.
+    def _wrapped(*args, **kwargs):
+        try:
+            callback(*args, **kwargs)
+        finally:
+            try:
+                CALLBACK_IDS.remove(callback_id[0])
+            except (ValueError, IndexError):
+                pass
+    callback_id = [None]
     try:
-        callback_id = BigWorld.callback(delay, callback)
-        CALLBACK_IDS.append(callback_id)
-        return callback_id
+        callback_id[0] = BigWorld.callback(delay, _wrapped)
+        CALLBACK_IDS.append(callback_id[0])
+        return callback_id[0]
     except Exception:
         LOGGER.exception('Unable to schedule callback %s', getattr(callback, '__name__', callback))
 
@@ -395,18 +409,20 @@ def _check_native_client_compatibility():
 
 
 def _invalidate_dossier_cache(reason='unknown'):
-    global DOSSIER_CACHE_GENERATION
+    global DOSSIER_CACHE_GENERATION, LAST_PAYLOAD_SIGNATURE
     try:
         DOSSIER_CACHE.clear()
         DOSSIER_CACHE_GENERATION += 1
+        LAST_PAYLOAD_SIGNATURE = None
         LOGGER.debug('Dossier cache invalidated (%s), generation=%d', reason, DOSSIER_CACHE_GENERATION)
     except Exception:
         LOGGER.exception('Unable to invalidate dossier cache (%s)', reason)
 
 
-def _refresh_all_models(reason='unknown'):
+def _refresh_all_models(reason='unknown', invalidate_dossier=False):
     try:
-        _invalidate_dossier_cache(reason)
+        if invalidate_dossier:
+            _invalidate_dossier_cache(reason)
         _sync_sort_property()
         for model in list(MODELS):
             try:
@@ -419,8 +435,10 @@ def _refresh_all_models(reason='unknown'):
 
 def _schedule_post_battle_refresh():
     # Staggered refresh: immediate + delayed passes to catch late dossier updates.
+    def refresh_after_battle():
+        _refresh_all_models('post battle refresh', invalidate_dossier=True)
     for delay in (0.2, 1.5, 4.0):
-        _register_callback(delay, _refresh_all_models)
+        _register_callback(delay, refresh_after_battle)
 
 
 def _on_account_become_player(*_args, **_kwargs):
@@ -466,7 +484,7 @@ def _refresh_native_provider(provider):
 
 
 def fini():
-    global SETTINGS_REGISTERED, DOSSIER_CACHE_GENERATION, DOSSIER_FETCH_COUNTER, LAST_DATA_SUMMARY, TOOLTIP_PAYLOAD_LOGGED, LEGACY_PLAYLISTS_REMOVED, CONFIG, RUNTIME_STATE, ACTIVE_FILTERS, MSA_API, MSA_SETTINGS, MSA_SYNCING
+    global SETTINGS_REGISTERED, DOSSIER_CACHE_GENERATION, DOSSIER_FETCH_COUNTER, LAST_DATA_SUMMARY, LAST_PAYLOAD, LAST_PAYLOAD_SIGNATURE, TOOLTIP_PAYLOAD_LOGGED, LEGACY_PLAYLISTS_REMOVED, CONFIG, RUNTIME_STATE, ACTIVE_FILTERS, MSA_API, MSA_SETTINGS, MSA_SYNCING
     try:
         g_playerEvents.onAvatarReady -= _track_last_played
     except Exception:
@@ -481,7 +499,9 @@ def fini():
         try:
             BigWorld.cancelCallback(callback_id)
         except Exception:
-            LOGGER.warning('Unable to cancel callback %s', callback_id)
+            # Can happen if the callback fired between the pop above and this
+            # call; not an error, so avoid warning-level log spam on exit.
+            LOGGER.debug('Unable to cancel callback %s', callback_id)
     MODELS[:] = []
     FILTER_PROVIDERS[:] = []
     STATISTICS_PRESENTERS[:] = []
@@ -489,6 +509,8 @@ def fini():
     DOSSIER_CACHE_GENERATION += 1
     DOSSIER_FETCH_COUNTER = 0
     LAST_DATA_SUMMARY = None
+    LAST_PAYLOAD = None
+    LAST_PAYLOAD_SIGNATURE = None
     TOOLTIP_PAYLOAD_LOGGED = False
     LEGACY_PLAYLISTS_REMOVED = False
     CONFIG = {}
@@ -544,12 +566,14 @@ def _carousel_auto():
 
 
 def _auto_rows_for_vehicle_count(vehicle_count):
+    # Automatic mode must never select 1: natively that is not a compact
+    # 1-row grid but CarouselTypeSetting.OPTIONS.SINGLE (single-vehicle
+    # showcase), which stretches one card to the full carousel height.
+    # A manual user choice of "1" still uses that native showcase as intended.
     try:
         count = max(0, int(vehicle_count))
     except (TypeError, ValueError):
         return 2
-    if count <= 8:
-        return 1
     if count <= 16:
         return 2
     if count <= 24:
@@ -598,6 +622,51 @@ def _sync_carousel_auto_property(enabled):
             LOGGER.exception('Unable to update automatic carousel mode')
 
 
+def _current_carousel_payload(total_vehicles=0):
+    return {'rows': _effective_carousel_rows(total_vehicles),
+            'mode': 'auto' if _carousel_auto() else 'manual',
+            'supportedRows': [1, 2, 3, 4]}
+
+
+def _publish_payload(payload):
+    state_json = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
+    active_filters_json = json.dumps(sorted(ACTIVE_FILTERS), separators=(',', ':'))
+    for model in list(MODELS):
+        try:
+            model.setStateJson(state_json)
+            model.setActiveFiltersJson(active_filters_json)
+        except Exception:
+            LOGGER.exception('Unable to publish lightweight HCC model update')
+
+
+def _build_lightweight_payload():
+    if not _is_hangar_context_active():
+        return {'version': MOD_VERSION, 'enabled': False, 'hangarActive': False}
+    if not LAST_PAYLOAD or LAST_PAYLOAD.get('hangarActive') is False:
+        return _build_payload()
+    total_vehicles = int(LAST_PAYLOAD.get('totalVehicles', 0) or 0)
+    payload = dict(LAST_PAYLOAD)
+    payload['enabled'] = bool(CONFIG.get('enabled', True))
+    payload['hangarActive'] = True
+    payload['filtering'] = {'enabled': bool(CONFIG.get('filtering', {}).get('enabled', True))}
+    payload['statsConfig'] = _normalized_card_stats_config(CONFIG.get('cardStats', {}))
+    payload['sorting'] = {'enabled': bool(CONFIG.get('sorting', {}).get('enabled', True)),
+                          'options': _get_sort_option_keys(),
+                          'mode': _sort_mode(),
+                          'descending': _sort_descending()}
+    payload['actionCards'] = CONFIG.get('actionCards', {})
+    payload['carousel'] = _current_carousel_payload(total_vehicles)
+    return payload
+
+
+def _refresh_models_lightweight(reason='unknown'):
+    try:
+        payload = _build_lightweight_payload()
+        _publish_payload(payload)
+    except Exception:
+        LOGGER.exception('Unable to refresh lightweight HCC model (%s)', reason)
+
+
 def _sort_mode():
     """Return current sort mode."""
     return RUNTIME_STATE.get('sortMode', 'nation')
@@ -631,9 +700,15 @@ def _sync_sort_property():
             LOGGER.exception('Unable to sync sort property to model')
 
 
-def _set_carousel_rows(rows, automatic=False):
+def _set_carousel_rows(rows, automatic=False, refresh=True):
     rows = int(rows)
+    if automatic and _carousel_auto() and rows == 1:
+        rows = _effective_carousel_rows()
     if rows == 0:
+        if _carousel_auto():
+            if refresh:
+                _refresh_models_lightweight('carousel row mode unchanged')
+            return
         RUNTIME_STATE['carouselRowsMode'] = 'auto'
         _save_runtime()
         _sync_carousel_auto_property(True)
@@ -643,16 +718,22 @@ def _set_carousel_rows(rows, automatic=False):
                 _set_native_provider_rows(provider, effective_rows)
             except Exception:
                 LOGGER.exception('Unable to apply automatic carousel rows (%d)', effective_rows)
-        for model in list(MODELS):
-            model.refresh()
+        if refresh:
+            _refresh_models_lightweight('automatic carousel row mode enabled')
 
         LOGGER.info('Automatic carousel row mode enabled')
         return
     rows = max(1, min(4, int(rows)))
+    current_rows = int(RUNTIME_STATE.get('carouselRows', 0) or 0)
+    current_mode = RUNTIME_STATE.get('carouselRowsMode', 'manual')
     if automatic:
         if not _carousel_auto():
             return
     else:
+        if current_mode == 'manual' and current_rows == rows:
+            if refresh:
+                _refresh_models_lightweight('carousel row count unchanged')
+            return
         RUNTIME_STATE['carouselRowsMode'] = 'manual'
     RUNTIME_STATE['carouselRows'] = rows
     _save_runtime()
@@ -663,8 +744,8 @@ def _set_carousel_rows(rows, automatic=False):
         except Exception:
             LOGGER.exception('Unable to apply %d carousel rows', rows)
 
-    for model in list(MODELS):
-        model.refresh()
+    if refresh:
+        _refresh_models_lightweight('carousel row count changed')
 
     LOGGER.info('Carousel row count changed to %d%s', rows, ' automatically' if automatic else '')
 
@@ -1086,11 +1167,12 @@ def _set_sorting_criteria(criteria):
     if not isinstance(criteria, list):
         criteria = []
     normalized = _normalize_sort_criteria(criteria)
+    if normalized == _get_configured_sorting_criteria():
+        return
     CONFIG.setdefault('sorting', {})['sorting_criteria'] = normalized
     _save_config()
     _sync_sort_property()
-    for model in list(MODELS):
-        model.refresh()
+    _refresh_models_lightweight('sorting criteria changed')
     LOGGER.info('Carousel sorting criteria changed to: %s', ', '.join(normalized))
 
 
@@ -1106,11 +1188,12 @@ def _set_nations_order(nations):
             continue
         normalized.append(token)
         seen.add(token)
+    if normalized == list(CONFIG.get('sorting', {}).get('nations_order', [])):
+        return
     CONFIG.setdefault('sorting', {})['nations_order'] = normalized
     _save_config()
     _sync_sort_property()
-    for model in list(MODELS):
-        model.refresh()
+    _refresh_models_lightweight('nation sort order changed')
     if normalized:
         LOGGER.info('Nation sort order updated: %s', ', '.join(normalized))
 
@@ -1119,11 +1202,12 @@ def _set_types_order(types):
     """Update vehicle type sort priority."""
     if not isinstance(types, list):
         types = []
+    if types == list(CONFIG.get('sorting', {}).get('types_order', [])):
+        return
     CONFIG.setdefault('sorting', {})['types_order'] = types
     _save_config()
     _sync_sort_property()
-    for model in list(MODELS):
-        model.refresh()
+    _refresh_models_lightweight('vehicle type sort order changed')
     if types:
         LOGGER.info('Vehicle type sort order updated: %s', ', '.join(types))
 
@@ -1131,9 +1215,14 @@ def _set_types_order(types):
 def _set_sorting(mode, descending=None):
     if mode not in SORT_UI_OPTION_ORDER and mode != 'default':
         mode = 'nation'
+    old_mode = _sort_mode()
+    old_descending = _sort_descending()
     RUNTIME_STATE['sortMode'] = mode
     if descending is not None:
         RUNTIME_STATE['sortDescending'] = bool(descending)
+    if old_mode == mode and old_descending == _sort_descending():
+        _refresh_models_lightweight('sorting unchanged')
+        return
     if mode == 'default':
         criteria = _get_configured_sorting_criteria()
     else:
@@ -1141,8 +1230,7 @@ def _set_sorting(mode, descending=None):
     CONFIG.setdefault('sorting', {})['sorting_criteria'] = _normalize_sort_criteria(criteria)
     _save_runtime()
     _sync_sort_property()
-    for model in list(MODELS):
-        model.refresh()
+    _refresh_models_lightweight('carousel sorting changed')
 
     LOGGER.info('Carousel sorting changed to %s (%s)', mode, 'descending' if _sort_descending() else 'ascending')
     return
@@ -1323,21 +1411,18 @@ def _apply_msa_filter_settings(settings):
     _save_runtime()
     _sync_sort_property()
     _refresh_native_vehicle_model()
-    for model in list(MODELS):
-        try:
-            model.refresh()
-        except Exception:
-            LOGGER.exception('Error refreshing model after MSA filter change')
+    _refresh_models_lightweight('MSA filter change')
     LOGGER.info('Filter state synchronized from ModsSettingsAPI: %s', sorted(ACTIVE_FILTERS))
 
 
 def _build_payload():
-    global LAST_DATA_SUMMARY, DOSSIER_FETCH_COUNTER
+    global LAST_DATA_SUMMARY, LAST_PAYLOAD, LAST_PAYLOAD_SIGNATURE, DOSSIER_FETCH_COUNTER
     DOSSIER_FETCH_COUNTER = 0  # Reset fetch counter for this refresh cycle
     # Outside the standard hangar the JS layer only needs the inactive flag to
     # drop its global decorations. Skip the expensive dossier/stats build.
     if not _is_hangar_context_active():
-        return {'version': MOD_VERSION, 'enabled': False, 'hangarActive': False}
+        LAST_PAYLOAD = {'version': MOD_VERSION, 'enabled': False, 'hangarActive': False}
+        return LAST_PAYLOAD
     try:
         vehicles = _inventory_vehicles()
     except Exception as e:
@@ -1347,6 +1432,15 @@ def _build_payload():
         LOGGER.warning('Inventory vehicles unavailable or empty; skipping payload build')
         return {}
     values = list(vehicles.values())
+    stats_config = _normalized_card_stats_config(CONFIG.get('cardStats', {}))
+    stats_enabled = bool(stats_config.get('enabled', True))
+    try:
+        vehicle_signature = tuple(sorted((int(vehicle.intCD) for vehicle in values)))
+    except Exception:
+        vehicle_signature = tuple()
+    payload_signature = (vehicle_signature, stats_enabled, DOSSIER_CACHE_GENERATION)
+    if LAST_PAYLOAD is not None and LAST_PAYLOAD_SIGNATURE == payload_signature and LAST_PAYLOAD.get('hangarActive') is not False:
+        return _build_lightweight_payload()
     # Cache account dossier to prevent race condition between sort and stats builds
     try:
         account_dossier = SERVICES.itemsCache.items.getAccountDossier()
@@ -1363,8 +1457,6 @@ def _build_payload():
             vehicle_cuts = {}
     else:
         vehicle_cuts = {}
-    stats_config = _normalized_card_stats_config(CONFIG.get('cardStats', {}))
-    stats_enabled = bool(stats_config.get('enabled', True))
     stats = {}
     if stats_enabled:
         for vehicle in values:
@@ -1382,7 +1474,7 @@ def _build_payload():
         count = _filter_count(filter_id, values)
         filters.append({'id': filter_id, 'count': count})
     
-    return {'version': MOD_VERSION,
+    LAST_PAYLOAD = {'version': MOD_VERSION,
      'language': getClientLanguage(),
      'enabled': bool(CONFIG.get('enabled', True)),
      'hangarActive': _is_hangar_context_active(),
@@ -1401,14 +1493,11 @@ def _build_payload():
                         'rented',
                         'daily_bonus',
                         'battle_pass_available'],
-    'carousel': {'rows': _effective_carousel_rows(len(values)),
-                  'mode': 'auto' if _carousel_auto() else 'manual',
-                  'supportedRows': [1,
-                                    2,
-                                    3,
-                                    4]},
+     'carousel': _current_carousel_payload(len(values)),
      'trackedLastPlayed': len(RUNTIME_STATE.get('lastPlayed', {})),
      'totalVehicles': len(values)}
+    LAST_PAYLOAD_SIGNATURE = payload_signature
+    return LAST_PAYLOAD
 
 
 class HangarCarouselClassicModel(ViewModel):
@@ -1642,11 +1731,37 @@ def _is_hangar_context_active():
 
 
 def _is_provider_disabled(provider):
-    return _is_frontline_filter(provider) or not _is_hangar_context_active()
+    return _is_frontline_filter(provider)
+
+
+def _reapply_provider_carousel_state(provider):
+    """Re-sync HCC properties and native row count for a tracked provider.
+
+    Needed because a provider can finish loading while the hangar context is
+    still resolving (e.g. right after returning from an event hangar), which
+    means the one-shot row application in patched_on_loading was skipped.
+    """
+    try:
+        with provider.viewModel.transaction() as model:
+            model.setHccCarouselAuto(_carousel_auto())
+            model.setHccSortJson(_build_sort_json())
+    except Exception:
+        LOGGER.exception('Unable to sync HCC properties in VehicleFilterModel')
+    try:
+        rows = _effective_carousel_rows() if _carousel_auto() else _carousel_rows() or 2
+        if rows == 1 and _carousel_auto():
+            rows = _effective_carousel_rows()
+        if rows != int(provider.viewModel.getCarouselRowCount()):
+            _set_native_provider_rows(provider, rows)
+    except Exception:
+        LOGGER.exception('Unable to reapply HCC carousel row configuration')
 
 
 def _on_hangar_space_event(*_args, **_kwargs):
-    _is_hangar_context_active()
+    became_active = _is_hangar_context_active()
+    if became_active:
+        for provider in list(FILTER_PROVIDERS):
+            _reapply_provider_carousel_state(provider)
     _refresh_all_models('hangar space event')
 
 
@@ -1683,9 +1798,16 @@ def _patch_vehicle_filters_provider():
 
     def patched_on_loading(self, *args, **kwargs):
         result = original_on_loading(self, *args, **kwargs)
+        # Track every non-frontline provider regardless of the current hangar
+        # context. The hangar space path can still be stale/updating right
+        # when this fires (e.g. returning from an event hangar), so relying
+        # on a one-shot "is active now" check here would permanently skip
+        # applying the configured row count to this provider instance.
         if _is_provider_disabled(self):
             return result
         _add_safe_provider(FILTER_PROVIDERS, self)
+        if not _is_hangar_context_active():
+            return result
         try:
             with self.viewModel.transaction() as model:
                 model.setHccCarouselAuto(_carousel_auto())
@@ -1717,7 +1839,7 @@ def _patch_vehicle_filters_provider():
             original_finalize(self)
 
     def patched_type_changed(self, args):
-        if _is_provider_disabled(self):
+        if _is_provider_disabled(self) or not _is_hangar_context_active():
             return original_type_changed(self, args)
         rows = max(1, min(4, int(args.get('rowCount', 2))))
         if bool(args.get('hccAuto', False) or args.get('hcpAuto', False)):
@@ -2063,10 +2185,8 @@ def _on_settings_changed(linkage, settings):
         actions['hideRestoreTank'] = bool(settings.get('hideRestoreTank', False))
         
         _save_config()
-        _refresh_native_vehicle_model()
-        _set_carousel_rows(int(settings.get('carouselRows', 0)))
-        for model in list(MODELS):
-            model.refresh()
+        _set_carousel_rows(int(settings.get('carouselRows', 0)), refresh=False)
+        _refresh_models_lightweight('MSA settings changed')
 
     except Exception:
         LOGGER.exception('Unable to apply ModsSettingsAPI settings')

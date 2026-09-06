@@ -132,6 +132,9 @@ function scheduleRender() {
       clearGlobalDecorations();
       return;
     }
+    for (const root of [document.documentElement, document.body]) {
+      if (root) root.classList.add("hcc-carousel-ready");
+    }
     applyCarouselRowsClass();
     applyActionCardsVisibility();
     renderNativeFilterPanel();
@@ -150,6 +153,7 @@ function clearGlobalDecorations() {
   for (const root of [document.documentElement, document.body]) {
     if (!root) continue;
     root.classList.remove(...CAROUSEL_ROW_CLASSES);
+    root.classList.remove("hcc-carousel-ready");
     root.classList.remove("hcc-hide-buy-tank", "hcc-hide-buy-slot", "hcc-hide-restore-tank");
   }
   hideTooltip();

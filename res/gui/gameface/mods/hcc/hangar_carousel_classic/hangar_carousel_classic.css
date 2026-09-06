@@ -7,6 +7,11 @@
   pointer-events: auto;
 }
 
+html:not(.hcc-carousel-ready) [class*="Page_carousel_"],
+body:not(.hcc-carousel-ready) [class*="Page_carousel_"] {
+  visibility: hidden !important;
+}
+
 .hcc-native-heading {
   margin: 0 0 5rem;
   color: #8c897f;
