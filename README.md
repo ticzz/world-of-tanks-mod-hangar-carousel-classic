@@ -22,6 +22,7 @@ Classic-style hangar carousel for World of Tanks 2.x with native Gameface integr
 
 ## How to Install (using .wotmod only)
 
+- See the complete [installation guide](docs/INSTALLATION.md).
 - First, download the most recent version from the [Releases](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases) page.
 - Copy the `.wotmod` file into your World of Tanks client's mods directory. 
 For instance, you might place it in a path like `G:/Games/World_of_Tanks_EU/mods/2.4.0.0/`. 
