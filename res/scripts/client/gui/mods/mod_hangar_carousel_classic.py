@@ -33,11 +33,16 @@ from skeletons.gui.game_control import IBattlePassController, IVehiclePlaylistsC
 from skeletons.gui.shared import IItemsCache
 
 try:
+    from skeletons.gui.shared.utils import IHangarSpace
+except Exception:
+    IHangarSpace = None
+
+try:
     from gui.filters import carousel_filter as carousel_filter_module
 except Exception:
     carousel_filter_module = None
 MOD_ID = 'mod_hangar_carousel_classic'
-MOD_VERSION = '1.0.11'
+MOD_VERSION = '1.0.12'
 MOD_LINKAGE_ID = 'mod_hangar.carousel.classic'
 PLAYLIST_ID_PREFIX = 'mhcc_'
 PREFERENCES_DIR = getPreferencesDirPath()
@@ -334,6 +339,8 @@ CALLBACK_IDS = []
 LAST_DATA_SUMMARY = None
 LEGACY_PLAYLISTS_REMOVED = False
 TOOLTIP_PAYLOAD_LOGGED = False
+ALLOWED_HANGAR_PREFIXES = ('spaces/hangar_v4',)
+HANGAR_GUARD_STATE = {'active': None, 'spacePath': None}
 SETTINGS_REGISTERED = False
 MSA_API = None
 MSA_SETTINGS = {}
@@ -1564,6 +1571,8 @@ def _patch_vehicle_tooltip():
     def patched_view_loading(self, *args, **kwargs):
         global TOOLTIP_PAYLOAD_LOGGED
         result = original_view_loading(self, *args, **kwargs)
+        if not _is_hangar_context_active():
+            return result
         try:
             vehicle = self._itemsCache.items.getVehicle(self._inventoryId)
             if vehicle is None:
@@ -1593,6 +1602,45 @@ def _is_frontline_filter(provider):
     return filter_module.startswith('frontline.')
 
 
+def _current_hangar_space_path():
+    if dependency is None or IHangarSpace is None:
+        return None
+    try:
+        return dependency.instance(IHangarSpace).spacePath
+    except Exception:
+        return None
+
+
+def _is_allowed_hangar_path(space_path):
+    if not space_path:
+        return False
+    normalized_path = space_path.lower()
+    return any(normalized_path.startswith(prefix.lower()) for prefix in ALLOWED_HANGAR_PREFIXES)
+
+
+def _is_hangar_context_active():
+    """Keep the mod out of event hangars such as Onslaught (spaces/h33_comp7).
+
+    Falls back to active when the hangar space service is unavailable so the
+    standard hangar keeps working on clients without the skeleton.
+    """
+    if dependency is None or IHangarSpace is None:
+        return True
+    space_path = _current_hangar_space_path()
+    if space_path is None:
+        return True
+    active = _is_allowed_hangar_path(space_path)
+    if active != HANGAR_GUARD_STATE.get('active') or space_path != HANGAR_GUARD_STATE.get('spacePath'):
+        HANGAR_GUARD_STATE['active'] = active
+        HANGAR_GUARD_STATE['spacePath'] = space_path
+        LOGGER.info('hangar context %s for path=%r', 'active' if active else 'inactive', space_path)
+    return active
+
+
+def _is_provider_disabled(provider):
+    return _is_frontline_filter(provider) or not _is_hangar_context_active()
+
+
 def _patch_vehicle_filters_provider():
     if getattr(VehicleFiltersDataProvider, '_hcc_rows_patched', False):
         return
@@ -1602,7 +1650,7 @@ def _patch_vehicle_filters_provider():
 
     def patched_on_loading(self, *args, **kwargs):
         result = original_on_loading(self, *args, **kwargs)
-        if _is_frontline_filter(self):
+        if _is_provider_disabled(self):
             return result
         _add_safe_provider(FILTER_PROVIDERS, self)
         try:
@@ -1636,7 +1684,7 @@ def _patch_vehicle_filters_provider():
             original_finalize(self)
 
     def patched_type_changed(self, args):
-        if _is_frontline_filter(self):
+        if _is_provider_disabled(self):
             return original_type_changed(self, args)
         rows = max(1, min(4, int(args.get('rowCount', 2))))
         if bool(args.get('hccAuto', False) or args.get('hcpAuto', False)):
@@ -1673,12 +1721,15 @@ def _patch_vehicle_statistics_presenter():
             original_finalize(self)
 
     def patched_update_vehicles(self, vehicles):
+        hangar_active = _is_hangar_context_active()
         filtered_vehicles = vehicles
-        if CONFIG.get('filtering', {}).get('enabled', True) and ACTIVE_FILTERS and vehicles is not None:
+        if hangar_active and CONFIG.get('filtering', {}).get('enabled', True) and ACTIVE_FILTERS and vehicles is not None:
             filtered_vehicles = dict(((int_cd, vehicle) for int_cd, vehicle in vehicles.items()
              if all((_matches(filter_id, vehicle) for filter_id in ACTIVE_FILTERS))))
         if original_update_vehicles:
             original_update_vehicles(self, filtered_vehicles)
+        if not hangar_active:
+            return
         try:
             _apply_auto_rows(len(filtered_vehicles) if filtered_vehicles is not None else None)
         except Exception:
