@@ -430,75 +430,28 @@
   margin-right: 11rem;
 }
 
-.hcc-carousel-rows-3 [class*="Page_c86c7327"],
-.hcc-carousel-rows-4 [class*="Page_c86c7327"] {
+.hcc-carousel-rows-3 [class*="Page_carousel_"],
+.hcc-carousel-rows-4 [class*="Page_carousel_"] {
   height: auto !important;
-  min-height: 100% !important;
+  min-height: 0 !important;
   overflow: visible !important;
 }
 
-.hcc-native-carousel--3,
-.hcc-carousel-rows-3 [class*="Page_carousel_"] {
-  flex-basis: 201rem !important;
-  flex-grow: 0 !important;
-  flex-shrink: 0 !important;
-  height: 201rem !important;
-  min-height: 201rem !important;
+.hcc-carousel-rows-3 [class*="Page_c86c7327"],
+.hcc-carousel-rows-4 [class*="Page_c86c7327"] {
+  overflow: visible !important;
 }
 
-.hcc-native-carousel--4,
-.hcc-carousel-rows-4 [class*="Page_carousel_"] {
-  flex-basis: 253rem !important;
-  flex-grow: 0 !important;
-  flex-shrink: 0 !important;
-  height: 253rem !important;
-  min-height: 253rem !important;
+.hcc-carousel-rows-3 [class*="Card_content_"],
+.hcc-carousel-rows-3 [class*="Card_e79008fd"],
+.hcc-carousel-rows-3 [class*="PreviewCard_"] {
+  --card-width: 66.6% !important;
+  --card-height: 66.6% !important;
 }
 
-.mediaMedium .hcc-native-carousel--3,
-.mediaMedium.hcc-carousel-rows-3 [class*="Page_carousel_"],
-.mediaMedium .hcc-carousel-rows-3 [class*="Page_carousel_"] {
-  flex-basis: 182rem !important;
-  height: 182rem !important;
-  min-height: 182rem !important;
-}
-
-.mediaMedium .hcc-native-carousel--4,
-.mediaMedium.hcc-carousel-rows-4 [class*="Page_carousel_"],
-.mediaMedium .hcc-carousel-rows-4 [class*="Page_carousel_"] {
-  flex-basis: 201rem !important;
-  height: 201rem !important;
-  min-height: 201rem !important;
-}
-
-.mediaLarge .hcc-native-carousel--3,
-.mediaLarge.hcc-carousel-rows-3 [class*="Page_carousel_"],
-.mediaLarge .hcc-carousel-rows-3 [class*="Page_carousel_"] {
-  flex-basis: 213rem !important;
-  height: 213rem !important;
-  min-height: 213rem !important;
-}
-
-.mediaLarge .hcc-native-carousel--4,
-.mediaLarge.hcc-carousel-rows-4 [class*="Page_carousel_"],
-.mediaLarge .hcc-carousel-rows-4 [class*="Page_carousel_"] {
-  flex-basis: 241rem !important;
-  height: 241rem !important;
-  min-height: 241rem !important;
-}
-
-.mediaExtraLarge .hcc-native-carousel--3,
-.mediaExtraLarge.hcc-carousel-rows-3 [class*="Page_carousel_"],
-.mediaExtraLarge .hcc-carousel-rows-3 [class*="Page_carousel_"] {
-  flex-basis: 255rem !important;
-  height: 255rem !important;
-  min-height: 255rem !important;
-}
-
-.mediaExtraLarge .hcc-native-carousel--4,
-.mediaExtraLarge.hcc-carousel-rows-4 [class*="Page_carousel_"],
-.mediaExtraLarge .hcc-carousel-rows-4 [class*="Page_carousel_"] {
-  flex-basis: 285rem !important;
-  height: 285rem !important;
-  min-height: 285rem !important;
+.hcc-carousel-rows-4 [class*="Card_content_"],
+.hcc-carousel-rows-4 [class*="Card_e79008fd"],
+.hcc-carousel-rows-4 [class*="PreviewCard_"] {
+  --card-width: 50% !important;
+  --card-height: 50% !important;
 }

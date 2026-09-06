@@ -154,10 +154,10 @@ try {
     if ($cssSource.Contains('calc(')) {
         throw 'Unsupported Gameface calc() expression found.'
     }
-    if (-not $cssSource.Contains('.hcc-native-carousel--3') -or
-        -not $cssSource.Contains('.hcc-native-carousel--4') -or
-        -not $cssSource.Contains('min-height: 285rem')) {
-        throw 'Extended carousel height rules are missing.'
+    if (-not $cssSource.Contains('.hcc-carousel-rows-3') -or
+        -not $cssSource.Contains('.hcc-carousel-rows-4') -or
+        -not $cssSource.Contains('--card-width: 50%')) {
+        throw 'Extended carousel row-scaling rules are missing.'
     }
     if (-not $cssSource.Contains('[data-test-id="buyTank"]') -or
         -not $cssSource.Contains('.hcc-native-sort-button')) {
