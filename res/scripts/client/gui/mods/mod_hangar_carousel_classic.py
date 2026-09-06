@@ -42,7 +42,7 @@ try:
 except Exception:
     carousel_filter_module = None
 MOD_ID = 'mod_hangar_carousel_classic'
-MOD_VERSION = '1.0.14'
+MOD_VERSION = '1.0.15'
 MOD_LINKAGE_ID = 'mod_hangar.carousel.classic'
 PLAYLIST_ID_PREFIX = 'mhcc_'
 PREFERENCES_DIR = getPreferencesDirPath()
@@ -569,9 +569,7 @@ def _auto_rows_for_vehicle_count(vehicle_count):
     try:
         count = max(0, int(vehicle_count))
     except (TypeError, ValueError):
-        return 1
-    if count <= 8:
-        return 1
+        return 2
     if count <= 16:
         return 2
     if count <= 24:
