@@ -34,7 +34,7 @@ which can be found in the [OpenWG Gameface releases](https://gitlab.com/openwg/w
 
 ## Full Package Installation
 
-- If you choose the complete package, [hangar_carousel_classic_1.0.11_full.zip](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.11/hangar_carousel_classic_1.0.11_full.zip) includes the carousel mod, `net.openwg.gameface`, and `Mod Menu`, all organized within `mods/2.4.0.0/`. Extract the contents directly into the World of Tanks installation directory.
+- If you choose the complete package, [hangar_carousel_classic_1.0.11_full.zip](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.11/hangar_carousel_classic_1.0.11_full.zip) includes the carousel mod, `Mod Menu`, `ModsSettingsBridge`, and `net.openwg.gameface`, all organized within `mods/2.4.0.0/`. Extract the contents directly into the World of Tanks installation directory.
 
 ## Build Locally
 
