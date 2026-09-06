@@ -42,7 +42,7 @@ try:
 except Exception:
     carousel_filter_module = None
 MOD_ID = 'mod_hangar_carousel_classic'
-MOD_VERSION = '1.0.13'
+MOD_VERSION = '1.0.14'
 MOD_LINKAGE_ID = 'mod_hangar.carousel.classic'
 PLAYLIST_ID_PREFIX = 'mhcc_'
 PREFERENCES_DIR = getPreferencesDirPath()
@@ -566,14 +566,12 @@ def _carousel_auto():
 
 
 def _auto_rows_for_vehicle_count(vehicle_count):
-    # Automatic mode must never select 1: natively that is not a compact
-    # 1-row grid but CarouselTypeSetting.OPTIONS.SINGLE (single-vehicle
-    # showcase), which stretches one card to the full carousel height.
-    # A manual user choice of "1" still uses that native showcase as intended.
     try:
         count = max(0, int(vehicle_count))
     except (TypeError, ValueError):
-        return 2
+        return 1
+    if count <= 8:
+        return 1
     if count <= 16:
         return 2
     if count <= 24:
@@ -702,8 +700,6 @@ def _sync_sort_property():
 
 def _set_carousel_rows(rows, automatic=False, refresh=True):
     rows = int(rows)
-    if automatic and _carousel_auto() and rows == 1:
-        rows = _effective_carousel_rows()
     if rows == 0:
         if _carousel_auto():
             if refresh:
@@ -1749,8 +1745,6 @@ def _reapply_provider_carousel_state(provider):
         LOGGER.exception('Unable to sync HCC properties in VehicleFilterModel')
     try:
         rows = _effective_carousel_rows() if _carousel_auto() else _carousel_rows() or 2
-        if rows == 1 and _carousel_auto():
-            rows = _effective_carousel_rows()
         if rows != int(provider.viewModel.getCarouselRowCount()):
             _set_native_provider_rows(provider, rows)
     except Exception:
