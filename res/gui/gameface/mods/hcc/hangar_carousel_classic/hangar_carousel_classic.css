@@ -430,69 +430,75 @@
   margin-right: 11rem;
 }
 
+.hcc-carousel-rows-3 [class*="Page_c86c7327"],
+.hcc-carousel-rows-4 [class*="Page_c86c7327"] {
+  height: auto !important;
+  min-height: 100% !important;
+  overflow: visible !important;
+}
+
 .hcc-native-carousel--3,
 .hcc-carousel-rows-3 [class*="Page_carousel_"] {
-  flex-basis: 220rem;
-  flex-grow: 0;
-  flex-shrink: 0;
-  height: 220rem;
-  min-height: 220rem;
+  flex-basis: 201rem !important;
+  flex-grow: 0 !important;
+  flex-shrink: 0 !important;
+  height: 201rem !important;
+  min-height: 201rem !important;
 }
 
 .hcc-native-carousel--4,
 .hcc-carousel-rows-4 [class*="Page_carousel_"] {
-  flex-basis: 291rem;
-  flex-grow: 0;
-  flex-shrink: 0;
-  height: 291rem;
-  min-height: 291rem;
+  flex-basis: 253rem !important;
+  flex-grow: 0 !important;
+  flex-shrink: 0 !important;
+  height: 253rem !important;
+  min-height: 253rem !important;
 }
 
 .mediaMedium .hcc-native-carousel--3,
 .mediaMedium.hcc-carousel-rows-3 [class*="Page_carousel_"],
 .mediaMedium .hcc-carousel-rows-3 [class*="Page_carousel_"] {
-  flex-basis: 241rem;
-  height: 241rem;
-  min-height: 241rem;
+  flex-basis: 182rem !important;
+  height: 182rem !important;
+  min-height: 182rem !important;
 }
 
 .mediaMedium .hcc-native-carousel--4,
 .mediaMedium.hcc-carousel-rows-4 [class*="Page_carousel_"],
 .mediaMedium .hcc-carousel-rows-4 [class*="Page_carousel_"] {
-  flex-basis: 319rem;
-  height: 319rem;
-  min-height: 319rem;
+  flex-basis: 201rem !important;
+  height: 201rem !important;
+  min-height: 201rem !important;
 }
 
 .mediaLarge .hcc-native-carousel--3,
 .mediaLarge.hcc-carousel-rows-3 [class*="Page_carousel_"],
 .mediaLarge .hcc-carousel-rows-3 [class*="Page_carousel_"] {
-  flex-basis: 274rem;
-  height: 274rem;
-  min-height: 274rem;
+  flex-basis: 213rem !important;
+  height: 213rem !important;
+  min-height: 213rem !important;
 }
 
 .mediaLarge .hcc-native-carousel--4,
 .mediaLarge.hcc-carousel-rows-4 [class*="Page_carousel_"],
 .mediaLarge .hcc-carousel-rows-4 [class*="Page_carousel_"] {
-  flex-basis: 363rem;
-  height: 363rem;
-  min-height: 363rem;
+  flex-basis: 241rem !important;
+  height: 241rem !important;
+  min-height: 241rem !important;
 }
 
 .mediaExtraLarge .hcc-native-carousel--3,
 .mediaExtraLarge.hcc-carousel-rows-3 [class*="Page_carousel_"],
 .mediaExtraLarge .hcc-carousel-rows-3 [class*="Page_carousel_"] {
-  flex-basis: 334rem;
-  height: 334rem;
-  min-height: 334rem;
+  flex-basis: 255rem !important;
+  height: 255rem !important;
+  min-height: 255rem !important;
 }
 
 .mediaExtraLarge .hcc-native-carousel--4,
 .mediaExtraLarge.hcc-carousel-rows-4 [class*="Page_carousel_"],
 .mediaExtraLarge .hcc-carousel-rows-4 [class*="Page_carousel_"] {
-  flex-basis: 443rem;
-  height: 443rem;
-  min-height: 443rem;
+  flex-basis: 285rem !important;
+  height: 285rem !important;
+  min-height: 285rem !important;
 }
-

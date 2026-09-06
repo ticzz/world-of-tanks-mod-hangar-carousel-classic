@@ -156,7 +156,7 @@ try {
     }
     if (-not $cssSource.Contains('.hcc-native-carousel--3') -or
         -not $cssSource.Contains('.hcc-native-carousel--4') -or
-        -not $cssSource.Contains('min-height: 443rem')) {
+        -not $cssSource.Contains('min-height: 285rem')) {
         throw 'Extended carousel height rules are missing.'
     }
     if (-not $cssSource.Contains('[data-test-id="buyTank"]') -or
