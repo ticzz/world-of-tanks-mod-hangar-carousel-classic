@@ -603,8 +603,7 @@ def _apply_auto_rows(vehicle_count=None):
     _save_runtime()
     for provider in list(FILTER_PROVIDERS):
         try:
-            if not _auto_uses_native_rows(rows):
-                _set_native_provider_rows(provider, rows)
+            _set_native_provider_rows(provider, rows)
         except Exception:
             LOGGER.exception('Unable to apply automatic carousel rows after filter update (%d)', rows)
     for model in list(MODELS):
@@ -714,8 +713,7 @@ def _set_carousel_rows(rows, automatic=False, refresh=True):
         effective_rows = _effective_carousel_rows()
         for provider in list(FILTER_PROVIDERS):
             try:
-                if not _auto_uses_native_rows(effective_rows):
-                    _set_native_provider_rows(provider, effective_rows)
+                _set_native_provider_rows(provider, effective_rows)
             except Exception:
                 LOGGER.exception('Unable to apply automatic carousel rows (%d)', effective_rows)
         if refresh:
@@ -1749,7 +1747,7 @@ def _reapply_provider_carousel_state(provider):
         LOGGER.exception('Unable to sync HCC properties in VehicleFilterModel')
     try:
         rows = _effective_carousel_rows() if _carousel_auto() else _carousel_rows() or 2
-        if not _auto_uses_native_rows(rows) and rows != int(provider.viewModel.getCarouselRowCount()):
+        if rows != int(provider.viewModel.getCarouselRowCount()):
             _set_native_provider_rows(provider, rows)
     except Exception:
         LOGGER.exception('Unable to reapply HCC carousel row configuration')
@@ -1818,7 +1816,7 @@ def _patch_vehicle_filters_provider():
                 rows = int(self.viewModel.getCarouselRowCount())
                 RUNTIME_STATE['carouselRows'] = rows
                 _save_runtime()
-            if not _auto_uses_native_rows(rows) and rows != int(self.viewModel.getCarouselRowCount()):
+            if rows != int(self.viewModel.getCarouselRowCount()):
                 _set_native_provider_rows(self, rows)
         except Exception:
             LOGGER.exception('Unable to apply HCC carousel row configuration')
@@ -1842,10 +1840,12 @@ def _patch_vehicle_filters_provider():
         rows = max(1, min(4, int(args.get('rowCount', 2))))
         if bool(args.get('hccAuto', False) or args.get('hcpAuto', False)):
             if rows <= 2:
-                return original_type_changed(self, args)
+                _set_native_provider_rows(self, rows)
+                return original_type_changed(self, {'rowCount': rows})
             _set_carousel_rows(rows, automatic=True)
             return None
         elif rows <= 2:
+            _set_native_provider_rows(self, rows)
             return original_type_changed(self, {'rowCount': rows})
         else:
             _set_carousel_rows(rows)
