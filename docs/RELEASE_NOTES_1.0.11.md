@@ -4,5 +4,6 @@
 - Fix multi-row carousel chunking so the vehicle cards render correctly.
 - Add WoT 2.4 native resource compatibility hashes.
 - Keep the existing settings API integration resilient to delayed startup availability.
+- Use the client's preferences directory via `getPreferencesDirPath` for configuration storage.
 - Replace the bundled ModsSettingsAPI package with Aslain's Mod Menu 2.0.07.
 - Include the required Aslain ModsSettingsBridge 1.0.2 dependency.
