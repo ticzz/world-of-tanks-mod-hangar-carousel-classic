@@ -73,7 +73,7 @@ function setButtonIcon(button, filterId) {
   button.appendChild(svg);
 }
 
-let state = { stats: {}, statsConfig: {}, filtering: {}, sorting: {}, actionCards: {}, carousel: { rows: 2 }, filters: [], activeFilters: [], enabled: false };
+let state = { stats: {}, statsConfig: {}, filtering: {}, sorting: {}, actionCards: {}, carousel: { rows: 2 }, filters: [], activeFilters: [], enabled: false, hangarActive: false };
 let lastStateJson = "";
 let lastActiveFiltersJson = "";
 let lastStatsDiagnostic = "";
@@ -128,6 +128,10 @@ function scheduleRender() {
   scheduled = true;
   requestAnimationFrame(() => {
     scheduled = false;
+    if (state.hangarActive === false) {
+      clearGlobalDecorations();
+      return;
+    }
     applyCarouselRowsClass();
     applyActionCardsVisibility();
     renderNativeFilterPanel();
@@ -135,11 +139,32 @@ function scheduleRender() {
   });
 }
 
+const CAROUSEL_ROW_CLASSES = [
+  "hcc-carousel-rows-1",
+  "hcc-carousel-rows-2",
+  "hcc-carousel-rows-3",
+  "hcc-carousel-rows-4"
+];
+
+function clearGlobalDecorations() {
+  for (const root of [document.documentElement, document.body]) {
+    if (!root) continue;
+    root.classList.remove(...CAROUSEL_ROW_CLASSES);
+    root.classList.remove("hcc-hide-buy-tank", "hcc-hide-buy-slot", "hcc-hide-restore-tank");
+  }
+  hideTooltip();
+  document.querySelectorAll(".hcc-native-section").forEach((node) => node.remove());
+  document.querySelectorAll(".hcc-card-stats").forEach((node) => node.remove());
+  document.querySelectorAll(".hcc-card-stats-host").forEach((node) => {
+    node.classList.remove("hcc-card-stats-host");
+  });
+}
+
 function applyCarouselRowsClass() {
   const rows = Math.max(1, Math.min(4, Number(state.carousel?.rows || 2)));
   for (const root of [document.documentElement, document.body]) {
     if (!root) continue;
-    root.classList.remove("hcc-carousel-rows-1", "hcc-carousel-rows-2", "hcc-carousel-rows-3", "hcc-carousel-rows-4");
+    root.classList.remove(...CAROUSEL_ROW_CLASSES);
     root.classList.add(`hcc-carousel-rows-${rows}`);
   }
 }
@@ -511,13 +536,16 @@ function syncModel() {
       // Validate payload structure for compatibility
       if (typeof parsedState !== "object" || !("version" in parsedState)) {
         console.warn("[HangarCarouselClassic] Invalid payload structure; expected versioned object");
-        state = { stats: {}, statsConfig: {}, sorting: {}, actionCards: {}, carousel: { rows: 2 }, filters: [], activeFilters: [], enabled: false };
+        state = { stats: {}, statsConfig: {}, sorting: {}, actionCards: {}, carousel: { rows: 2 }, filters: [], activeFilters: [], enabled: false, hangarActive: false };
+        scheduleRender();
         return;
       }
       state = parsedState;
+      state.hangarActive = parsedState.hangarActive !== false;
     } catch (error) {
       console.error("[HangarCarouselClassic] Invalid state JSON", error);
-      state = { stats: {}, statsConfig: {}, sorting: {}, actionCards: {}, carousel: { rows: 2 }, filters: [], activeFilters: [], enabled: false };
+      state = { stats: {}, statsConfig: {}, sorting: {}, actionCards: {}, carousel: { rows: 2 }, filters: [], activeFilters: [], enabled: false, hangarActive: false };
+      scheduleRender();
       return;
     }
   }

@@ -1381,6 +1381,7 @@ def _build_payload():
     return {'version': MOD_VERSION,
      'language': getClientLanguage(),
      'enabled': bool(CONFIG.get('enabled', True)),
+     'hangarActive': _is_hangar_context_active(),
      'filterMode': 'native_toggles',
      'filters': filters,
      'filtering': {'enabled': bool(CONFIG.get('filtering', {}).get('enabled', True))},
@@ -1602,15 +1603,6 @@ def _is_frontline_filter(provider):
     return filter_module.startswith('frontline.')
 
 
-def _current_hangar_space_path():
-    if dependency is None or IHangarSpace is None:
-        return None
-    try:
-        return dependency.instance(IHangarSpace).spacePath
-    except Exception:
-        return None
-
-
 def _is_allowed_hangar_path(space_path):
     if not space_path:
         return False
@@ -1621,14 +1613,22 @@ def _is_allowed_hangar_path(space_path):
 def _is_hangar_context_active():
     """Keep the mod out of event hangars such as Onslaught (spaces/h33_comp7).
 
-    Falls back to active when the hangar space service is unavailable so the
-    standard hangar keeps working on clients without the skeleton.
+    Fail-closed while the hangar space is still loading, because the client
+    restores the last used game mode on startup and may open an event hangar
+    directly.  Space events re-evaluate the state as soon as it is known.
     """
     if dependency is None or IHangarSpace is None:
         return True
-    space_path = _current_hangar_space_path()
-    if space_path is None:
+    try:
+        hangar_space = dependency.instance(IHangarSpace)
+    except Exception:
+        hangar_space = None
+    if hangar_space is None:
         return True
+    try:
+        space_path = hangar_space.spacePath
+    except Exception:
+        space_path = None
     active = _is_allowed_hangar_path(space_path)
     if active != HANGAR_GUARD_STATE.get('active') or space_path != HANGAR_GUARD_STATE.get('spacePath'):
         HANGAR_GUARD_STATE['active'] = active
@@ -1639,6 +1639,35 @@ def _is_hangar_context_active():
 
 def _is_provider_disabled(provider):
     return _is_frontline_filter(provider) or not _is_hangar_context_active()
+
+
+def _on_hangar_space_event(*_args, **_kwargs):
+    _is_hangar_context_active()
+    _refresh_all_models('hangar space event')
+
+
+def _bind_hangar_space_events():
+    if HANGAR_GUARD_STATE.get('bound') or dependency is None or IHangarSpace is None:
+        return
+    try:
+        hangar_space = dependency.instance(IHangarSpace)
+    except Exception:
+        hangar_space = None
+    if hangar_space is None:
+        tries = int(HANGAR_GUARD_STATE.get('bindTries', 0))
+        if tries >= 20:
+            return
+        HANGAR_GUARD_STATE['bindTries'] = tries + 1
+        delay = min(0.35 * (1.6 ** tries), 8.0)
+        _register_callback(delay + random.uniform(0.0, 0.2), _bind_hangar_space_events)
+        return
+    try:
+        hangar_space.onSpaceCreate += _on_hangar_space_event
+        hangar_space.onSpaceChanged += _on_hangar_space_event
+        hangar_space.onSpaceDestroy += _on_hangar_space_event
+        HANGAR_GUARD_STATE['bound'] = True
+    except Exception:
+        LOGGER.debug('Unable to bind hangar space events', exc_info=True)
 
 
 def _patch_vehicle_filters_provider():
@@ -1728,12 +1757,11 @@ def _patch_vehicle_statistics_presenter():
              if all((_matches(filter_id, vehicle) for filter_id in ACTIVE_FILTERS))))
         if original_update_vehicles:
             original_update_vehicles(self, filtered_vehicles)
-        if not hangar_active:
-            return
-        try:
-            _apply_auto_rows(len(filtered_vehicles) if filtered_vehicles is not None else None)
-        except Exception:
-            LOGGER.exception('Unable to apply automatic rows from statistics presenter')
+        if hangar_active:
+            try:
+                _apply_auto_rows(len(filtered_vehicles) if filtered_vehicles is not None else None)
+            except Exception:
+                LOGGER.exception('Unable to apply automatic rows from statistics presenter')
         _refresh_all_models('statistics presenter update')
 
     VehiclesStatisticsPresenter.__init__ = patched_init
@@ -1974,6 +2002,7 @@ def _on_settings_changed(linkage, settings):
                 _patch_vehicle_tooltip()
                 _patch_vehicle_statistics_presenter()
                 _patch_legacy_playlist_cleanup()
+                _bind_hangar_space_events()
                 g_playerEvents.onAvatarReady += _track_last_played
                 if hasattr(g_playerEvents, 'onAccountBecomePlayer'):
                     g_playerEvents.onAccountBecomePlayer += _on_account_become_player
@@ -2057,6 +2086,7 @@ if CONFIG.get('enabled', True):
         _patch_vehicle_tooltip()
         _patch_vehicle_statistics_presenter()
         _patch_legacy_playlist_cleanup()
+        _bind_hangar_space_events()
         g_playerEvents.onAvatarReady += _track_last_played
         if hasattr(g_playerEvents, 'onAccountBecomePlayer'):
             g_playerEvents.onAccountBecomePlayer += _on_account_become_player
