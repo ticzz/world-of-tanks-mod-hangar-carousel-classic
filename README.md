@@ -9,7 +9,7 @@ Classic-style hangar carousel for World of Tanks 2.x with native Gameface integr
 - Full release notes: [GitHub Releases](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases)
 - Mod ID: hangar.carousel.classic
 - Runtime: WoT embedded Python 2.7
-- Tested game version: 2.3.1.2
+- Tested game version: 2.4.0.0
 
 ## Key Features
 
