@@ -50,6 +50,7 @@ CONFIG_PATH = os.path.join(PREFERENCES_DIR, 'mods', 'mod_hangar_carousel_classic
 RUNTIME_PATH = os.path.join(PREFERENCES_DIR, 'mods', 'mod_hangar_carousel_classic', 'runtime.json')
 LEGACY_CONFIG_PATH = os.path.join('res_mods', 'configs', 'hangar_carousel_classic', 'config.json')
 LEGACY_RUNTIME_PATH = os.path.join('res_mods', 'configs', 'hangar_carousel_classic', 'runtime.json')
+CONFIG_NEEDS_SAVE = False
 JS_URL = 'coui://gui/gameface/mods/hcc/hangar_carousel_classic/hangar_carousel_classic.js'
 CSS_URL = 'coui://gui/gameface/mods/hcc/hangar_carousel_classic/hangar_carousel_classic.css'
 TOOLTIP_JS_URL = 'coui://gui/gameface/mods/hcc/hangar_carousel_classic/hangar_carousel_classic.tooltip.js'
@@ -72,8 +73,7 @@ NATIVE_RESOURCE_HASHES = (
 DEFAULT_CONFIG = {'schemaVersion': 5,
  'enabled': True,
  'filtering': {'enabled': True},
- 'tankfilters': {'favorite': {'enabled': True},
-                 'non_elite': {'enabled': False},
+ 'tankfilters': {'non_elite': {'enabled': False},
                  'not_ready': {'enabled': False},
                  'marks_incomplete': {'enabled': False},
                  'crew_not_maxed': {'enabled': False}},
@@ -111,7 +111,7 @@ class _Services(object):
 
 
 SERVICES = _Services()
-FILTER_ORDER = ('all', 'favorite', 'non_elite', 'not_ready', 'marks_incomplete', 'crew_not_maxed')
+FILTER_ORDER = ('all', 'non_elite', 'not_ready', 'marks_incomplete', 'crew_not_maxed')
 SORT_CRITERIA_ORDER = ('nation', 'type', 'level', '-level', 'maxBattleTier', '-maxBattleTier', 'premium', '-premium',
                        'battles', '-battles', 'winRate', '-winRate', 'markOfMastery', '-markOfMastery',
                        'averageDamage', '-averageDamage', 'alphaDamage', '-alphaDamage', 'marksOnGun', '-marksOnGun',
@@ -170,7 +170,10 @@ def _get_available_sort_criteria():
 
 def _get_configured_sorting_criteria():
     sorting = CONFIG.get('sorting', {})
-    return _normalize_sort_criteria(sorting.get('sorting_criteria', _default_sorting_criteria()), fallback=_default_sorting_criteria())
+    raw_criteria = sorting.get('sorting_criteria')
+    if raw_criteria is None:
+        return _default_sorting_criteria()
+    return _normalize_sort_criteria(raw_criteria, fallback=[])
 
 
 def _get_sort_option_keys():
@@ -276,12 +279,18 @@ def _migrate_config(loaded):
             sorting.pop('default', None)
             loaded['sorting'] = sorting
             LOGGER.info('Migrated config from sortMode/descending to sorting_criteria')
-    
+
+    tankfilters = loaded.get('tankfilters')
+    if isinstance(tankfilters, dict) and 'favorite' in tankfilters:
+        tankfilters.pop('favorite')
+        LOGGER.info('Removed deprecated tankfilters.favorite; the vanilla client provides this filter')
+
     loaded['schemaVersion'] = 5
     return loaded
 
 
 def _load_config():
+    global CONFIG_NEEDS_SAVE
     for path in (CONFIG_PATH, LEGACY_CONFIG_PATH):
         try:
             with io.open(path, 'r', encoding='utf-8-sig') as config_file:
@@ -290,6 +299,9 @@ def _load_config():
                 raise ValueError('root value must be an object')
             if path != CONFIG_PATH:
                 LOGGER.info('Loaded legacy config from %s; future saves will use %s', path, CONFIG_PATH)
+            tankfilters = loaded.get('tankfilters')
+            if path != CONFIG_PATH or (isinstance(tankfilters, dict) and 'favorite' in tankfilters):
+                CONFIG_NEEDS_SAVE = True
             return _deep_merge(DEFAULT_CONFIG, _migrate_config(loaded))
         except IOError:
             continue
@@ -328,7 +340,7 @@ def _is_hcc_playlist_id(value):
 CONFIG = _load_config()
 RUNTIME_STATE = _load_runtime()
 if not os.path.isfile(CONFIG_PATH) and os.path.isfile(LEGACY_CONFIG_PATH):
-    _save_config()
+    CONFIG_NEEDS_SAVE = True
 if not os.path.isfile(RUNTIME_PATH) and os.path.isfile(LEGACY_RUNTIME_PATH):
     _save_runtime()
 ACTIVE_FILTERS = set((filter_id for filter_id in RUNTIME_STATE.get('activeFilters', []) if filter_id in FILTER_ORDER and filter_id != 'all'))
@@ -336,6 +348,7 @@ MODELS = []
 FILTER_PROVIDERS = []
 STATISTICS_PRESENTERS = []
 CALLBACK_IDS = []
+FINAL_VISIBLE_VEHICLE_COUNT = None
 LAST_DATA_SUMMARY = None
 LAST_PAYLOAD = None
 LAST_PAYLOAD_SIGNATURE = None
@@ -484,7 +497,7 @@ def _refresh_native_provider(provider):
 
 
 def fini():
-    global SETTINGS_REGISTERED, DOSSIER_CACHE_GENERATION, DOSSIER_FETCH_COUNTER, LAST_DATA_SUMMARY, LAST_PAYLOAD, LAST_PAYLOAD_SIGNATURE, TOOLTIP_PAYLOAD_LOGGED, LEGACY_PLAYLISTS_REMOVED, CONFIG, RUNTIME_STATE, ACTIVE_FILTERS, MSA_API, MSA_SETTINGS, MSA_SYNCING
+    global SETTINGS_REGISTERED, DOSSIER_CACHE_GENERATION, DOSSIER_FETCH_COUNTER, FINAL_VISIBLE_VEHICLE_COUNT, LAST_DATA_SUMMARY, LAST_PAYLOAD, LAST_PAYLOAD_SIGNATURE, TOOLTIP_PAYLOAD_LOGGED, LEGACY_PLAYLISTS_REMOVED, CONFIG, RUNTIME_STATE, ACTIVE_FILTERS, MSA_API, MSA_SETTINGS, MSA_SYNCING
     try:
         g_playerEvents.onAvatarReady -= _track_last_played
     except Exception:
@@ -505,6 +518,7 @@ def fini():
     MODELS[:] = []
     FILTER_PROVIDERS[:] = []
     STATISTICS_PRESENTERS[:] = []
+    FINAL_VISIBLE_VEHICLE_COUNT = None
     DOSSIER_CACHE.clear()
     DOSSIER_CACHE_GENERATION += 1
     DOSSIER_FETCH_COUNTER = 0
@@ -551,6 +565,11 @@ def _save_runtime():
         LOGGER.exception('Unable to save runtime state at %s', RUNTIME_PATH)
 
 
+if CONFIG_NEEDS_SAVE:
+    _save_config()
+    CONFIG_NEEDS_SAVE = False
+
+
 def _carousel_rows():
     try:
         rows = int(RUNTIME_STATE.get('carouselRows', 0))
@@ -570,6 +589,8 @@ def _auto_rows_for_vehicle_count(vehicle_count):
         count = max(0, int(vehicle_count))
     except (TypeError, ValueError):
         return 2
+    if count <= 8:
+        return 1
     if count <= 16:
         return 2
     if count <= 24:
@@ -577,12 +598,72 @@ def _auto_rows_for_vehicle_count(vehicle_count):
     return 4
 
 
+def _normalize_row_count(rows, fallback=2):
+    try:
+        value = int(rows)
+    except (TypeError, ValueError):
+        return int(fallback)
+    if value < 1:
+        return int(fallback)
+    return max(1, min(4, value))
+
+
+def _provider_row_count(provider):
+    try:
+        current = getattr(provider, '_VehicleFiltersDataProvider__rowCount', None)
+        if current is not None:
+            return _normalize_row_count(current, fallback=2)
+    except Exception:
+        pass
+    try:
+        model = getattr(provider, 'viewModel', None)
+        if model is not None and hasattr(model, 'getCarouselRowCount'):
+            return _normalize_row_count(model.getCarouselRowCount(), fallback=2)
+    except Exception:
+        pass
+    return 2
+
+
+def _sync_provider_row_count(provider, rows, force=False):
+    target_rows = _normalize_row_count(rows, fallback=2)
+    current_rows = _provider_row_count(provider)
+    if not force and current_rows == target_rows:
+        return False
+    return _set_native_provider_rows(provider, target_rows)
+
+
+def _sync_runtime_target_for_auto(rows):
+    global LAST_PAYLOAD_SIGNATURE
+    target_rows = _normalize_row_count(rows, fallback=2)
+    current_rows = int(RUNTIME_STATE.get('carouselRows', 0) or 0)
+    if current_rows == target_rows:
+        return target_rows
+    RUNTIME_STATE['carouselRows'] = target_rows
+    LAST_PAYLOAD_SIGNATURE = None
+    _save_runtime()
+    return target_rows
+
+
+def _sync_auto_runtime_rows(vehicle_count=None):
+    global LAST_PAYLOAD_SIGNATURE
+    if not _carousel_auto():
+        return _carousel_rows() or 2
+    # The final Gameface filter list is the only authoritative Auto input.
+    # ``vehicle_count`` remains for compatibility with existing call sites.
+    if FINAL_VISIBLE_VEHICLE_COUNT is None:
+        return _sync_runtime_target_for_auto(2)
+    rows = _auto_rows_for_vehicle_count(FINAL_VISIBLE_VEHICLE_COUNT)
+    current_rows = int(RUNTIME_STATE.get('carouselRows', 0) or 0)
+    if current_rows != rows:
+        _sync_runtime_target_for_auto(rows)
+    elif rows <= 2 and current_rows not in (1, 2):
+        LAST_PAYLOAD_SIGNATURE = None
+    return rows
+
+
 def _effective_carousel_rows(vehicle_count=None):
     if _carousel_auto():
-        if vehicle_count is None:
-            vehicles = _inventory_vehicles()
-            vehicle_count = len(vehicles.values()) if vehicles else 0
-        return _auto_rows_for_vehicle_count(vehicle_count)
+        return _sync_auto_runtime_rows(vehicle_count)
     return _carousel_rows() or 2
 
 
@@ -591,19 +672,18 @@ def _auto_uses_native_rows(rows):
 
 
 def _apply_auto_rows(vehicle_count=None):
+    global FINAL_VISIBLE_VEHICLE_COUNT
     if not _carousel_auto():
         return
-    if vehicle_count is None:
-        vehicles = _inventory_vehicles()
-        vehicle_count = len(vehicles.values()) if vehicles else 0
-    rows = _auto_rows_for_vehicle_count(vehicle_count)
-    if int(RUNTIME_STATE.get('carouselRows', 0) or 0) == rows:
-        return
-    RUNTIME_STATE['carouselRows'] = rows
-    _save_runtime()
+    if vehicle_count is not None:
+        try:
+            FINAL_VISIBLE_VEHICLE_COUNT = max(0, int(vehicle_count))
+        except (TypeError, ValueError):
+            return
+    rows = _sync_auto_runtime_rows()
     for provider in list(FILTER_PROVIDERS):
         try:
-            _set_native_provider_rows(provider, rows)
+            _sync_provider_row_count(provider, rows)
         except Exception:
             LOGGER.exception('Unable to apply automatic carousel rows after filter update (%d)', rows)
     for model in list(MODELS):
@@ -652,6 +732,8 @@ def _build_lightweight_payload():
     payload['statsConfig'] = _normalized_card_stats_config(CONFIG.get('cardStats', {}))
     payload['sorting'] = {'enabled': bool(CONFIG.get('sorting', {}).get('enabled', True)),
                           'options': _get_sort_option_keys(),
+                          'criteria': [criterion[1:] if criterion.startswith('-') else criterion for criterion in _get_configured_sorting_criteria()] if _sort_mode() != 'default' else [],
+                          'signedCriteria': _get_configured_sorting_criteria() if _sort_mode() != 'default' else [],
                           'mode': _sort_mode(),
                           'descending': _sort_descending()}
     payload['actionCards'] = CONFIG.get('actionCards', {})
@@ -689,6 +771,21 @@ def _refresh_native_vehicle_model():
         LOGGER.debug('Unable to refresh native vehicle model')
 
 
+def _refresh_statistics_presenters():
+    """Rebuild native statistics after an HCC-only filter state change."""
+    for presenter in list(STATISTICS_PRESENTERS):
+        update_vehicles = getattr(presenter, '_VehiclesStatisticsPresenter__updateVehicles', None)
+        vehicles_component = getattr(presenter, '_vehiclesComponent', None)
+        vehicles = getattr(vehicles_component, 'vehicles', None)
+        if not callable(update_vehicles) or vehicles is None:
+            LOGGER.warning('Native statistics presenter refresh unavailable')
+            continue
+        try:
+            update_vehicles(vehicles)
+        except Exception:
+            LOGGER.exception('Unable to refresh native statistics after HCC filter change')
+
+
 def _sync_sort_property():
     """Sync sorting configuration to all models."""
     sort_json = _build_sort_json()
@@ -704,12 +801,18 @@ def _set_carousel_rows(rows, automatic=False, refresh=True):
     rows = int(rows)
     if rows == 0:
         if _carousel_auto():
+            effective_rows = _sync_auto_runtime_rows()
+            for provider in list(FILTER_PROVIDERS):
+                try:
+                    _set_native_provider_rows(provider, effective_rows)
+                except Exception:
+                    LOGGER.exception('Unable to apply automatic carousel rows (%d)', effective_rows)
             if refresh:
                 _refresh_models_lightweight('carousel row mode unchanged')
             return
         RUNTIME_STATE['carouselRowsMode'] = 'auto'
-        effective_rows = _effective_carousel_rows()
-        RUNTIME_STATE['carouselRows'] = effective_rows
+        effective_rows = _sync_auto_runtime_rows()
+        LAST_PAYLOAD_SIGNATURE = None
         _save_runtime()
         _sync_carousel_auto_property(True)
         for provider in list(FILTER_PROVIDERS):
@@ -735,6 +838,7 @@ def _set_carousel_rows(rows, automatic=False, refresh=True):
             return
         RUNTIME_STATE['carouselRowsMode'] = 'manual'
     RUNTIME_STATE['carouselRows'] = rows
+    LAST_PAYLOAD_SIGNATURE = None
     _save_runtime()
     _sync_carousel_auto_property(_carousel_auto())
     for provider in list(FILTER_PROVIDERS):
@@ -1111,7 +1215,7 @@ def _build_sort_json(account_random_stats=None, vehicle_cuts=None):
     """Build JSON payload with hierarchical sorting criteria (nation -> type -> tier etc.)."""
     sorting_enabled = bool(CONFIG.get('sorting', {}).get('enabled', True))
     filtering_enabled = bool(CONFIG.get('filtering', {}).get('enabled', True))
-    sorting_criteria = _get_configured_sorting_criteria() if sorting_enabled else []
+    sorting_criteria = [] if (not sorting_enabled or _sort_mode() == 'default') else _get_configured_sorting_criteria()
     # Tuple comparator reads from index 0 to N, so keep the user order intact:
     # first configured criterion is the primary key.
     applied_criteria = list(sorting_criteria)
@@ -1161,18 +1265,43 @@ def _build_sort_json(account_random_stats=None, vehicle_cuts=None):
     return json.dumps(payload, separators=(',', ':'), default=str)
 
 
-def _set_sorting_criteria(criteria):
+def _coerce_criteria_sequence(criteria):
+    """Accept Gameface array proxies as well as plain Python sequences."""
+    if criteria is None:
+        return []
+    if isinstance(criteria, (list, tuple)):
+        return list(criteria)
+    if isinstance(criteria, basestring):
+        return [criteria]
+    try:
+        return [item for item in criteria]
+    except TypeError:
+        return []
+
+
+def _infer_descending(criteria):
+    for c in criteria or []:
+        name = c[1:] if c.startswith("-") else c
+        if name not in ("nation", "type"):
+            return c.startswith("-")
+    return any(c.startswith("-") for c in (criteria or []))
+
+
+def _set_sorting_criteria(criteria, descending=None):
     """Update sorting criteria and refresh."""
-    if not isinstance(criteria, list):
-        criteria = []
-    normalized = _normalize_sort_criteria(criteria)
-    if normalized == _get_configured_sorting_criteria():
+    criteria = _coerce_criteria_sequence(criteria)
+    normalized = _normalize_sort_criteria(criteria, fallback=[])
+    target_descending = bool(descending) if descending is not None else _infer_descending(normalized)
+    if normalized == _get_configured_sorting_criteria() and target_descending == RUNTIME_STATE.get("sortDescending", False):
         return
-    CONFIG.setdefault('sorting', {})['sorting_criteria'] = normalized
+    CONFIG.setdefault("sorting", {})["sorting_criteria"] = normalized
+    RUNTIME_STATE["sortMode"] = normalized[0][1:] if normalized and normalized[0].startswith("-") else (normalized[0] if normalized else "default")
+    RUNTIME_STATE["sortDescending"] = target_descending
     _save_config()
+    _save_runtime()
     _sync_sort_property()
-    _refresh_models_lightweight('sorting criteria changed')
-    LOGGER.info('Carousel sorting criteria changed to: %s', ', '.join(normalized))
+    _refresh_models_lightweight("sorting criteria changed")
+    LOGGER.info("Carousel sorting criteria changed to: %s (descending=%s)", ", ".join(normalized), target_descending)
 
 
 def _set_nations_order(nations):
@@ -1223,10 +1352,11 @@ def _set_sorting(mode, descending=None):
         _refresh_models_lightweight('sorting unchanged')
         return
     if mode == 'default':
-        criteria = _get_configured_sorting_criteria()
+        CONFIG.setdefault('sorting', {})['sorting_criteria'] = []
     else:
         criteria = [('%s%s' % ('-' if _sort_descending() else '', mode))]
-    CONFIG.setdefault('sorting', {})['sorting_criteria'] = _normalize_sort_criteria(criteria)
+        CONFIG.setdefault('sorting', {})['sorting_criteria'] = _normalize_sort_criteria(criteria)
+    _save_config()
     _save_runtime()
     _sync_sort_property()
     _refresh_models_lightweight('carousel sorting changed')
@@ -1288,9 +1418,7 @@ def _matches(filter_id, vehicle):
     """Check if vehicle matches the given filter."""
     if filter_id == 'all':
         return True
-    elif filter_id == 'favorite':
-        return bool(getattr(vehicle, 'isFavorite', False))
-    elif filter_id == 'non_elite':
+    if filter_id == 'non_elite':
         return not bool(getattr(vehicle, 'isElite', False))
     elif filter_id == 'not_ready':
         try:
@@ -1333,12 +1461,7 @@ def _filter_count(filter_id, vehicles):
 def _set_filter_state(filter_id):
     """Toggle filter state with atomic snapshot to prevent race conditions during model refresh."""
     if filter_id == 'all':
-        if ACTIVE_FILTERS:
-            ACTIVE_FILTERS.clear()
-        else:
-            for fid in FILTER_ORDER:
-                if fid != 'all':
-                    ACTIVE_FILTERS.add(fid)
+        ACTIVE_FILTERS.clear()
     elif filter_id in FILTER_ORDER:
         if filter_id in ACTIVE_FILTERS:
             ACTIVE_FILTERS.discard(filter_id)
@@ -1351,6 +1474,7 @@ def _set_filter_state(filter_id):
     _sync_msa_filter_settings()
     _sync_sort_property()
     _refresh_native_vehicle_model()
+    _refresh_statistics_presenters()
     
     # Snapshot for logging (avoid race condition if ACTIVE_FILTERS modified during refresh)
     active_snapshot = set(ACTIVE_FILTERS)
@@ -1410,6 +1534,7 @@ def _apply_msa_filter_settings(settings):
     _save_runtime()
     _sync_sort_property()
     _refresh_native_vehicle_model()
+    _refresh_statistics_presenters()
     _refresh_models_lightweight('MSA filter change')
     LOGGER.info('Filter state synchronized from ModsSettingsAPI: %s', sorted(ACTIVE_FILTERS))
 
@@ -1437,7 +1562,16 @@ def _build_payload():
         vehicle_signature = tuple(sorted((int(vehicle.intCD) for vehicle in values)))
     except Exception:
         vehicle_signature = tuple()
-    payload_signature = (vehicle_signature, stats_enabled, DOSSIER_CACHE_GENERATION)
+    payload_signature = (
+        vehicle_signature,
+        stats_enabled,
+        bool(_carousel_auto()),
+        int(RUNTIME_STATE.get('carouselRows', 0) or 0),
+        tuple(sorted(ACTIVE_FILTERS)),
+        _sort_mode(),
+        bool(_sort_descending()),
+        DOSSIER_CACHE_GENERATION,
+    )
     if LAST_PAYLOAD is not None and LAST_PAYLOAD_SIGNATURE == payload_signature and LAST_PAYLOAD.get('hangarActive') is not False:
         return _build_lightweight_payload()
     # Cache account dossier to prevent race condition between sort and stats builds
@@ -1467,7 +1601,7 @@ def _build_payload():
         LAST_DATA_SUMMARY = summary
         LOGGER.info('Carousel data: %d vehicles, %d stat records, %d with battles', *summary)
     
-    # Calculate filter counts
+    # HCC badges intentionally count HCC filters against the complete inventory.
     filters = []
     for filter_id in FILTER_ORDER:
         count = _filter_count(filter_id, values)
@@ -1484,6 +1618,8 @@ def _build_payload():
      'statsConfig': stats_config,
      'sorting': {'enabled': bool(CONFIG.get('sorting', {}).get('enabled', True)),
                  'options': _get_sort_option_keys(),
+                 'criteria': [criterion[1:] if criterion.startswith('-') else criterion for criterion in _get_configured_sorting_criteria()] if _sort_mode() != 'default' else [],
+                 'signedCriteria': _get_configured_sorting_criteria() if _sort_mode() != 'default' else [],
                  'mode': _sort_mode(),
                  'descending': _sort_descending()},
      'actionCards': CONFIG.get('actionCards', {}),
@@ -1561,13 +1697,23 @@ class HangarCarouselClassicModel(ViewModel):
 
     def __on_set_sorting(self, args):
         try:
-            _set_sorting(args.get('mode', 'default') if args else 'default', args.get('descending') if args and 'descending' in args else None)
+            if args:
+                descending = args.get("descending", None)
+                criteria_json = args.get("criteriaJson", None)
+                if isinstance(criteria_json, basestring):
+                    try:
+                        parsed = json.loads(criteria_json)
+                        _set_sorting_criteria(parsed, descending=descending)
+                        return
+                    except (TypeError, ValueError):
+                        LOGGER.warning("Invalid sorting criteria JSON from Gameface: %r", criteria_json)
+                _set_sorting(args.get("mode", "default"), descending)
+            else:
+                _set_sorting("default")
         except Exception:
-            LOGGER.exception('Unable to change carousel sorting')
+            LOGGER.exception("Unable to change carousel sorting")
 
         return
-
-
 class HangarCarouselClassicTooltipModel(ViewModel):
     __slots__ = ()
 
@@ -1734,6 +1880,7 @@ def _is_provider_disabled(provider):
 
 
 def _reapply_provider_carousel_state(provider):
+    global LAST_PAYLOAD_SIGNATURE
     """Re-sync HCC properties and native row count for a tracked provider.
 
     Needed because a provider can finish loading while the hangar context is
@@ -1748,8 +1895,9 @@ def _reapply_provider_carousel_state(provider):
         LOGGER.exception('Unable to sync HCC properties in VehicleFilterModel')
     try:
         rows = _effective_carousel_rows() if _carousel_auto() else _carousel_rows() or 2
-        if rows != int(provider.viewModel.getCarouselRowCount()):
-            _set_native_provider_rows(provider, rows)
+        if rows != _provider_row_count(provider):
+            LAST_PAYLOAD_SIGNATURE = None
+            _sync_provider_row_count(provider, rows, force=True)
     except Exception:
         LOGGER.exception('Unable to reapply HCC carousel row configuration')
 
@@ -1791,7 +1939,6 @@ def _patch_vehicle_filters_provider():
         return
     original_on_loading = VehicleFiltersDataProvider._onLoading
     original_finalize = VehicleFiltersDataProvider._finalize
-    original_type_changed = VehicleFiltersDataProvider._VehicleFiltersDataProvider__onCarouselTypeChanged
 
     def patched_on_loading(self, *args, **kwargs):
         result = original_on_loading(self, *args, **kwargs)
@@ -1812,13 +1959,9 @@ def _patch_vehicle_filters_provider():
         except Exception:
             LOGGER.exception('Unable to initialize HCC properties in VehicleFilterModel')
         try:
-            rows = _carousel_rows()
-            if not rows:
-                rows = int(self.viewModel.getCarouselRowCount())
-                RUNTIME_STATE['carouselRows'] = rows
-                _save_runtime()
-            if rows != int(self.viewModel.getCarouselRowCount()):
-                _set_native_provider_rows(self, rows)
+            rows = _effective_carousel_rows() if _carousel_auto() else _carousel_rows() or 2
+            if rows != _provider_row_count(self):
+                _sync_provider_row_count(self, rows, force=True)
         except Exception:
             LOGGER.exception('Unable to apply HCC carousel row configuration')
         return result
@@ -1835,26 +1978,8 @@ def _patch_vehicle_filters_provider():
         finally:
             original_finalize(self)
 
-    def patched_type_changed(self, args):
-        if _is_provider_disabled(self) or not _is_hangar_context_active():
-            return original_type_changed(self, args)
-        rows = max(1, min(4, int(args.get('rowCount', 2))))
-        if bool(args.get('hccAuto', False) or args.get('hcpAuto', False)):
-            if rows <= 2:
-                _set_native_provider_rows(self, rows)
-                return original_type_changed(self, {'rowCount': rows})
-            _set_carousel_rows(rows, automatic=True)
-            return None
-        elif rows <= 2:
-            _set_native_provider_rows(self, rows)
-            return original_type_changed(self, {'rowCount': rows})
-        else:
-            _set_carousel_rows(rows)
-            return None
-
     VehicleFiltersDataProvider._onLoading = patched_on_loading
     VehicleFiltersDataProvider._finalize = patched_finalize
-    VehicleFiltersDataProvider._VehicleFiltersDataProvider__onCarouselTypeChanged = patched_type_changed
     VehicleFiltersDataProvider._hcc_rows_patched = True
 
 
@@ -1922,8 +2047,6 @@ def _settings_tooltip(title, body):
 SETTINGS_TEXT = {'en': {'display': u'Carousel and cards',
     'filtering': u'Filtering',
     'filteringTooltip': u'Enable or disable filtering. Individual filters can be toggled here in MSA or in the HCC filter panel. Counts use the current native vehicle list: ALL shows vehicles matching every active filter, and each filter count shows matching vehicles within that current selection. HCC changes synchronize the MSA values and vehicle list; MSA changes synchronize the HCC panel and vehicle list.',
-    'filterFavorite': u'Favorite tanks',
-    'filterFavoriteTooltip': u'Show only vehicles marked as favorite in the game client.',
     'filterNonElite': u'Non-elite tanks',
     'filterNonEliteTooltip': u'Show only vehicles that do not have elite status.',
     'filterNotReady': u'Broken / crew incomplete',
@@ -2049,7 +2172,6 @@ def _register_settings():
          u'4'], rows_value, tooltip=_settings_tooltip(text['rows'], text['rowsTooltip']))]
         
         filter_settings = (
-            ('favorite', 'filterFavorite', 'filterFavoriteTooltip'),
             ('non_elite', 'filterNonElite', 'filterNonEliteTooltip'),
             ('not_ready', 'filterNotReady', 'filterNotReadyTooltip'),
             ('marks_incomplete', 'filterMarksIncomplete', 'filterMarksIncompleteTooltip'),
@@ -2078,7 +2200,7 @@ def _register_settings():
                                   tooltip=_settings_tooltip(text['hideRestoreTank'], text['hideRestoreTankTooltip']))]
         
         template = {'modDisplayName': u'Hangar Carousel Classic',
-         'settingsVersion': 6,
+         'settingsVersion': 7,
          'enabled': bool(CONFIG.get('enabled', True)),
          'column1': column1,
          'column2': column2}
@@ -2089,7 +2211,7 @@ def _register_settings():
         if isinstance(saved_settings, dict):
             MSA_SETTINGS = dict(saved_settings)
         SETTINGS_REGISTERED = True
-        LOGGER.info('ModsSettingsAPI integration registered (sorting + 8 filters)')
+        LOGGER.info('ModsSettingsAPI integration registered (sorting + 4 HCC filters)')
     except Exception:
         LOGGER.exception('Unable to register ModsSettingsAPI integration')
         _schedule_settings_registration()

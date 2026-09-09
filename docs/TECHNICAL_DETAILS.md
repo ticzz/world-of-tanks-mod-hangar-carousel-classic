@@ -44,16 +44,14 @@ Minimum battles threshold is configurable.
 
 ### Filters
 
-Supported filter IDs:
+HCC filter IDs:
 
-- bonus
-- favorite
-- elite
-- premium
 - non_elite
 - not_ready
 - marks_incomplete
 - crew_not_maxed (matches vehicles whose currently assigned crew is not fully trained for that vehicle according to the client crew state)
+
+Native WoT filters, including bonus, favorite, elite, premium, and rented/temporary vehicles, remain available in the vanilla filter panel.
 
 ### Advanced Hierarchical Sorting
 

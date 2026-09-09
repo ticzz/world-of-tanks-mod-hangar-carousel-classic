@@ -15,7 +15,7 @@ Classic-style hangar carousel for World of Tanks 2.x with native Gameface integr
 
 - Carousel rows: manual 1-4 and auto mode.
 - Vehicle card stats: battles, win rate, average damage, alpha damage, mastery, marks on gun.
-- Native filters: bonus, favorite, elite, premium, non-elite, not ready, marks incomplete, and crew not maxed are always shown in the vanilla carousel filter popover. Active filters are combined with AND logic and immediately applied to the carousel.
+- Vanilla filters include bonus, favorite, elite, premium, and rented/temporary vehicles. HCC provides non-elite, not-ready, marks-incomplete, and crew-not-fully-trained filters. Active filters are combined with AND logic and immediately applied to the carousel.
 - Filtering, sorting, and card statistics can be enabled independently. Individual filters and single-rule sorting are toggled in the HCC panel; multiple sorting rules are configured as a hierarchy in ModsSettingsAPI.
 - Advanced hierarchical sorting with optional reverse per criterion.
 - Nation/type priority layers for deterministic grouping.

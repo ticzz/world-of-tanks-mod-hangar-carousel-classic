@@ -436,27 +436,37 @@ body:not(.hcc-carousel-ready) [class*="Page_carousel_"] {
 }
 
 .hcc-carousel-rows-3 [class*="Page_carousel_"],
-.hcc-carousel-rows-4 [class*="Page_carousel_"] {
+.hcc-carousel-rows-4 [class*="Page_carousel_"],
+.hcc-native-carousel-page--3,
+.hcc-native-carousel-page--4 {
   height: auto !important;
   min-height: 0 !important;
   overflow: visible !important;
 }
 
 .hcc-carousel-rows-3 [class*="Page_c86c7327"],
-.hcc-carousel-rows-4 [class*="Page_c86c7327"] {
+.hcc-carousel-rows-4 [class*="Page_c86c7327"],
+.hcc-native-carousel-page--3,
+.hcc-native-carousel-page--4 {
   overflow: visible !important;
 }
 
 .hcc-carousel-rows-3 [class*="Card_content_"],
 .hcc-carousel-rows-3 [class*="Card_e79008fd"],
-.hcc-carousel-rows-3 [class*="PreviewCard_"] {
+.hcc-carousel-rows-3 [class*="PreviewCard_"],
+.hcc-native-carousel-page--3 [class*="Card_content_"],
+.hcc-native-carousel-page--3 [class*="Card_e79008fd"],
+.hcc-native-carousel-page--3 [class*="PreviewCard_"] {
   --card-width: 66.6% !important;
   --card-height: 66.6% !important;
 }
 
 .hcc-carousel-rows-4 [class*="Card_content_"],
 .hcc-carousel-rows-4 [class*="Card_e79008fd"],
-.hcc-carousel-rows-4 [class*="PreviewCard_"] {
+.hcc-carousel-rows-4 [class*="PreviewCard_"],
+.hcc-native-carousel-page--4 [class*="Card_content_"],
+.hcc-native-carousel-page--4 [class*="Card_e79008fd"],
+.hcc-native-carousel-page--4 [class*="PreviewCard_"] {
   --card-width: 50% !important;
   --card-height: 50% !important;
 }

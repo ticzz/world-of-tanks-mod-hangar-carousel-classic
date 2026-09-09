@@ -56,8 +56,20 @@ $replacements = @(
         'r={...t.primitives(["defaultFilters","hccCarouselAuto","hccSortJson"])},'
     ),
     @(
+        'if(!s&&O(t)&&!a?.fromWotPlus)return!1;',
+        'if(s?(!O(t)||a?.fromWotPlus):O(t)&&!a?.fromWotPlus)return!1;'
+    ),
+    @(
         'l={...t.primitives(["carouselRowCount"]),filters:e.box(i,{deep:!1}),searchName:e.box(n?.[0]??""),nations:t.arrayClone("nationsOrder")};',
         'l={...t.primitives(["carouselRowCount"]),hccCarouselAuto:r.hccCarouselAuto,hccSortJson:r.hccSortJson,filters:e.box(i,{deep:!1}),searchName:e.box(n?.[0]??""),nations:t.arrayClone("nationsOrder")};'
+    ),
+    @(
+        'i=ir(),r=qi().model.carouselRowCount.get(),c=i.model.prebattleModeActive(),d=i.model.telecomRentStatus.get(),u=i.model.current.ids(),',
+        'i=ir(),c=i.model.prebattleModeActive(),d=i.model.telecomRentStatus.get(),u=i.model.current.ids(),r=qi().model.hccCarouselAuto.get()?(u.length<=8?1:u.length<=16?2:u.length<=24?3:4):qi().model.carouselRowCount.get(),'
+    ),
+    @(
+        'const e=Re(),t=qi(),a=ir().model.selectedVehicle(),s=t.model.carouselRowCount.get(),i=void 0===a,',
+        'const e=Re(),t=qi(),a=ir().model.selectedVehicle(),s=t.model.hccCarouselAuto.get()?(ir().model.current.amount()<=8?1:ir().model.current.amount()<=16?2:ir().model.current.amount()<=24?3:4):t.model.carouselRowCount.get(),i=void 0===a,'
     ),
     @(
         'h=q.primitive(()=>{const e=[...m.getAll()],t=a.requires.filters.model.computes.nationToIndex();return e.sort((e,a)=>Hi(t,Wi,e,a)),e});',
@@ -65,7 +77,7 @@ $replacements = @(
     ),
     @(
         'o=(s?u(s.list):h()).filter(s=>!1!==r.has(s.id)&&(!!Ri(e,s,a.requires.statistic.model.get(s.id))&&Vi(t,s)));i(()=>n.set(o))',
-        'o=(s?u(s.list):h()).filter(s=>!1!==r.has(s.id)&&(!!Ri(e,s,a.requires.statistic.model.get(s.id))&&Vi(t,s)));const hcc=(()=>{try{return JSON.parse(a.requires.filters.model.hccSortJson.get()||"{}")}catch(e){return{}}})(),hccValues=hcc.values||{},hccAllowed=new Set((hcc.allowed||[]).map(e=>String(e)));hcc.filtered&&o.splice(0,o.length,...o.filter(e=>hccAllowed.has(String(e.id))||hccAllowed.has(String(e.inventoryId)))),o.sort((e,t)=>{const a=hccValues[String(e.id)]||hccValues[e.id]||hccValues[String(e.inventoryId)]||hccValues[e.inventoryId]||[],s=hccValues[String(t.id)]||hccValues[t.id]||hccValues[String(t.inventoryId)]||hccValues[t.inventoryId]||[],n=Math.max(a.length,s.length);for(let e=0;e<n;e++){const t=Number(a[e]??0),n=Number(s[e]??0);if(t!==n)return t<n?-1:1}return 0}),i(()=>n.set(o))'
+        'o=(s?u(s.list):h()).filter(s=>!1!==r.has(s.id)&&(!!Ri(e,s,a.requires.statistic.model.get(s.id))&&Vi(t,s)));const hcc=(()=>{try{return JSON.parse(a.requires.filters.model.hccSortJson.get()||"{}")}catch(e){return{}}})(),hccValues=hcc.values||{},hccAllowed=new Set((hcc.allowed||[]).map(e=>String(e)));hcc.filtered&&o.splice(0,o.length,...o.filter(e=>hccAllowed.has(String(e.id))||hccAllowed.has(String(e.inventoryId)))),o.sort((e,t)=>{const a=hccValues[String(e.id)]||hccValues[e.id]||hccValues[String(e.inventoryId)]||hccValues[e.inventoryId]||[],s=hccValues[String(t.id)]||hccValues[t.id]||hccValues[String(e.inventoryId)]||hccValues[e.inventoryId]||[],n=Math.max(a.length,s.length);for(let e=0;e<n;e++){const t=Number(a[e]??0),n=Number(s[e]??0);if(t!==n)return t<n?-1:1}return 0}),i(()=>n.set(o))'
     ),
     @(
         'carouselTypeChange:n.createCallback(e=>({rowCount:e}),"onCarouselTypeChange")',
@@ -105,7 +117,7 @@ $replacements = @(
     ),
     @(
         'className:l(rW,2===s&&oW)',
-        'className:l(rW,1<s&&oW)'
+        'className:l(rW,1<s&&oW,3===s&&"hcc-native-carousel-page--3",4===s&&"hcc-native-carousel-page--4")'
     )
 )
 

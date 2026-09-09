@@ -6,7 +6,6 @@ const LABELS = {
     filters: "HCC filters",
     filter_count_description: "ALL shows the vehicles matching every active filter; each filter count shows the matching vehicles within that current selection.",
     filter_all: "All vehicles",
-    filter_favorite: "Favorite tanks",
     filter_non_elite: "Non-elite tanks",
     filter_not_ready: "Broken / crew incomplete",
     filter_marks_incomplete: "Marks incomplete (Tier V+)",
@@ -55,7 +54,6 @@ const FILTER_SVG_NS = "http://www.w3.org/2000/svg";
 
 const FILTER_ICONS = {
   all: '<path d="M4 6h16M4 12h16M4 18h16"/>',
-  favorite: '<path d="M12 3.5l2.47 5.13 5.53.82-4 3.98.94 5.57L12 16.4l-4.94 2.6.94-5.57-4-3.98 5.53-.82L12 3.5z"/>',
   non_elite: '<rect x="12" y="4.2" width="11" height="11" rx="1.5" transform="rotate(45 12 12)"/>',
   not_ready: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
   marks_incomplete: '<circle cx="12" cy="8" r="5.2"/><path d="M8.4 12.9L7 21l5-2.8L17 21l-1.4-8.1"/>',
@@ -99,6 +97,20 @@ function unwrap(value) {
 
 function labels() {
   return LABELS.en;
+}
+
+function sortCriterionName(criterion) {
+  return String(criterion || "").replace(/^-/, "");
+}
+
+function currentSortCriteria() {
+  if (Array.isArray(state.sorting?.signedCriteria)) {
+    return state.sorting.signedCriteria.map((criterion) => String(criterion || "")).filter(Boolean);
+  }
+  if (Array.isArray(state.sorting?.criteria)) {
+    return state.sorting.criteria.map((criterion) => String(criterion || "")).filter(Boolean);
+  }
+  return state.sorting?.mode && state.sorting.mode !== "default" ? [state.sorting.mode] : [];
 }
 
 function findModel() {
@@ -165,7 +177,7 @@ function clearGlobalDecorations() {
 }
 
 function applyCarouselRowsClass() {
-  if (state.carousel?.mode === "auto" && Number(state.carousel?.rows || 2) <= 2) {
+  if (state.carousel?.mode === "auto") {
     for (const root of [document.documentElement, document.body]) {
       if (!root) continue;
       root.classList.remove(...CAROUSEL_ROW_CLASSES);
@@ -453,27 +465,39 @@ function renderNativeFilterPanel() {
     }
   }
 
-  if (state.sorting?.enabled && Array.isArray(state.sorting.options)) {
+  const availableCriteria = state.sorting?.availableCriteria || state.sorting?.options;
+  if (state.sorting?.enabled && Array.isArray(availableCriteria)) {
     addHeading(newSection, labels().sorting);
     const sorting = document.createElement("div");
     sorting.className = "hcc-native-sorting";
     newSection.appendChild(sorting);
-    for (const mode of state.sorting.options) {
+    const activeCriteria = currentSortCriteria();
+    for (const mode of availableCriteria) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "hcc-native-sort-button";
-      if (mode === state.sorting.mode) button.classList.add("hcc-native-sort-button--active");
+      const active = activeCriteria.some((criterion) => sortCriterionName(criterion) === mode);
+      if (active) button.classList.add("hcc-native-sort-button--active");
       setButtonGlyph(button, SORT_ICONS[mode] || SORT_ICONS.default, "hcc-native-sort-glyph");
       const title = labels()[`sort_${mode}`] || mode;
       button.setAttribute("aria-label", title);
       button.title = title;
-      bindTooltip(button, title, mode === state.sorting.mode
+      bindTooltip(button, title, active
         ? (state.sorting.descending ? labels().descending : labels().ascending)
         : "");
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        callCommand("onSetSorting", { mode, descending: Boolean(state.sorting.descending) });
+        const descending = Boolean(state.sorting.descending);
+        const nextCriteria = active
+          ? activeCriteria.filter((criterion) => sortCriterionName(criterion) !== mode)
+          : [`${descending && mode !== "nation" && mode !== "type" ? "-" : ""}${mode}`, ...activeCriteria.filter((criterion) => sortCriterionName(criterion) !== mode)];
+        const payloadCriteria = nextCriteria;
+        callCommand("onSetSorting", {
+          mode: payloadCriteria.length ? sortCriterionName(payloadCriteria[0]) : "default",
+          criteriaJson: JSON.stringify(payloadCriteria),
+          descending
+        });
       });
       sorting.appendChild(button);
     }
@@ -490,9 +514,25 @@ function renderNativeFilterPanel() {
     direction.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
+      const activeCriteria = currentSortCriteria();
+      if (!activeCriteria.length) {
+        callCommand("onSetSorting", {
+          mode: "default",
+          criteriaJson: "[]",
+          descending: false
+        });
+        return;
+      }
+      const descending = !Boolean(state.sorting.descending);
+      const criteria = activeCriteria.map((criterion) => {
+        const name = sortCriterionName(criterion);
+        if (name === "nation" || name === "type") return criterion;
+        return `${descending ? "-" : ""}${name}`;
+      });
       callCommand("onSetSorting", {
-        mode: state.sorting.mode || "default",
-        descending: !Boolean(state.sorting.descending)
+        mode: criteria.length ? sortCriterionName(criteria[0]) : "default",
+        criteriaJson: JSON.stringify(criteria),
+        descending
       });
     });
     sorting.appendChild(direction);

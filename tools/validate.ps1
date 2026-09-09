@@ -112,7 +112,18 @@ try {
         )) {
         throw 'Native carousel bundle does not contain Classic sorting support.'
     }
-
+    if (-not $nativeSource.Contains('hccCarouselAuto.get()?(u.length<=8?1:u.length<=16?2:u.length<=24?3:4)')) {
+        throw 'Native carousel bundle does not calculate automatic rows from the final vehicle list.'
+    }
+    if (-not $nativeSource.Contains('hccCarouselAuto.get()?(ir().model.current.amount()<=8?1:ir().model.current.amount()<=16?2:ir().model.current.amount()<=24?3:4)')) {
+        throw 'Native carousel page does not calculate automatic height from the final vehicle list.'
+    }
+    if (-not $nativeSource.Contains('3===s&&"hcc-native-carousel-page--3",4===s&&"hcc-native-carousel-page--4"')) {
+        throw 'Native carousel page does not expose the three- and four-row layout classes.'
+    }
+    if (-not $nativeSource.Contains('if(s?(!O(t)||a?.fromWotPlus):O(t)&&!a?.fromWotPlus)return!1;')) {
+        throw 'Native rental filter does not use Classic inverted semantics.'
+    }
     $tooltipBundle = $zip.GetEntry('res/gui/gameface/_dist/production/mono/hangar/views/vehicle_tooltip/vehicle_tooltip.html/bundle.js')
     $tooltipStream = $tooltipBundle.Open()
     $tooltipReader = New-Object IO.StreamReader($tooltipStream, [Text.Encoding]::UTF8)

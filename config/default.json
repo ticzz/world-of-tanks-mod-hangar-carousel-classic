@@ -3,7 +3,6 @@
   "enabled": true,
   "tankfilters": {
     "bonus": { "enabled": true },
-    "favorite": { "enabled": true },
     "elite": { "enabled": true },
     "premium": { "enabled": true },
     "non_elite": { "enabled": false },
