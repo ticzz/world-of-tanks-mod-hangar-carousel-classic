@@ -46,7 +46,7 @@ try:
 except Exception:
     carousel_filter_module = None
 MOD_ID = 'mod_hangar_carousel_classic'
-MOD_VERSION = '1.0.20'
+MOD_VERSION = '1.0.23'
 MOD_LINKAGE_ID = 'mod_hangar.carousel.classic'
 PLAYLIST_ID_PREFIX = 'mhcc_'
 PREFERENCES_DIR = getPreferencesDirPath()
@@ -397,9 +397,13 @@ SETTINGS_REGISTRATION_STATE = {
     'exhaustedLogged': False
 }
 DOSSIER_CACHE = {}
+MARKS_INCOMPLETE_CACHE = {}
+ALPHA_DAMAGE_CACHE = {}
+ALPHA_DAMAGE_STATS = {'hits': 0, 'computed': 0}
 DOSSIER_CACHE_GENERATION = 0
 DOSSIER_FETCH_COUNTER = 0
 MAX_DOSSIER_FETCHES_PER_REFRESH = 256
+DOSSIER_LIMIT_LOGGED = False
 COMPATIBILITY_WARNING_SHOWN = False
 ITEMS_CACHE_SYNC_BOUND = False
 DOSSIER_RESYNC_BOUND = False
@@ -467,11 +471,34 @@ def _invalidate_dossier_cache(reason='unknown'):
     global DOSSIER_CACHE_GENERATION, LAST_PAYLOAD_SIGNATURE
     try:
         DOSSIER_CACHE.clear()
+        MARKS_INCOMPLETE_CACHE.clear()
         DOSSIER_CACHE_GENERATION += 1
         LAST_PAYLOAD_SIGNATURE = None
         LOGGER.debug('Dossier cache invalidated (%s), generation=%d', reason, DOSSIER_CACHE_GENERATION)
     except Exception:
         LOGGER.exception('Unable to invalidate dossier cache (%s)', reason)
+
+
+def _get_vehicle_dossier(vehicle_id, respect_refresh_limit=False):
+    global DOSSIER_FETCH_COUNTER, DOSSIER_LIMIT_LOGGED
+    cache_key = (int(vehicle_id), DOSSIER_CACHE_GENERATION)
+    if cache_key in DOSSIER_CACHE:
+        return DOSSIER_CACHE[cache_key]
+    if respect_refresh_limit:
+        if DOSSIER_FETCH_COUNTER >= MAX_DOSSIER_FETCHES_PER_REFRESH:
+            if not DOSSIER_LIMIT_LOGGED:
+                DOSSIER_LIMIT_LOGGED = True
+                LOGGER.warning('Dossier fetch limit reached; unavailable vehicle statistics will be deferred')
+            return None
+        DOSSIER_FETCH_COUNTER += 1
+    try:
+        items = SERVICES.itemsCache.items if SERVICES.itemsCache else None
+        dossier = items.getVehicleDossier(cache_key[0]) if items is not None else None
+    except Exception:
+        LOGGER.debug('Unable to fetch dossier for vehicle %d', cache_key[0], exc_info=True)
+        dossier = None
+    DOSSIER_CACHE[cache_key] = dossier
+    return dossier
 
 
 def _refresh_all_models(reason='unknown', invalidate_dossier=False):
@@ -600,7 +627,7 @@ def _refresh_native_provider(provider):
 
 
 def fini():
-    global SETTINGS_REGISTERED, DOSSIER_CACHE_GENERATION, DOSSIER_FETCH_COUNTER, FINAL_VISIBLE_VEHICLE_COUNT, LAST_DATA_SUMMARY, LAST_PAYLOAD, LAST_PAYLOAD_SIGNATURE, TOOLTIP_PAYLOAD_LOGGED, LEGACY_PLAYLISTS_REMOVED, CONFIG, RUNTIME_STATE, ACTIVE_FILTERS, MSA_API, MSA_SETTINGS, MSA_SYNCING
+    global SETTINGS_REGISTERED, DOSSIER_CACHE_GENERATION, DOSSIER_FETCH_COUNTER, DOSSIER_LIMIT_LOGGED, FINAL_VISIBLE_VEHICLE_COUNT, LAST_DATA_SUMMARY, LAST_PAYLOAD, LAST_PAYLOAD_SIGNATURE, TOOLTIP_PAYLOAD_LOGGED, LEGACY_PLAYLISTS_REMOVED, CONFIG, RUNTIME_STATE, ACTIVE_FILTERS, MSA_API, MSA_SETTINGS, MSA_SYNCING
     try:
         g_playerEvents.onAvatarReady -= _track_last_played
     except Exception:
@@ -625,8 +652,11 @@ def fini():
     STATISTICS_PRESENTERS[:] = []
     FINAL_VISIBLE_VEHICLE_COUNT = None
     DOSSIER_CACHE.clear()
+    MARKS_INCOMPLETE_CACHE.clear()
+    ALPHA_DAMAGE_CACHE.clear()
     DOSSIER_CACHE_GENERATION += 1
     DOSSIER_FETCH_COUNTER = 0
+    DOSSIER_LIMIT_LOGGED = False
     LAST_DATA_SUMMARY = None
     LAST_PAYLOAD = None
     LAST_PAYLOAD_SIGNATURE = None
@@ -998,8 +1028,55 @@ def _marks_on_gun_level(vehicle_dossier):
         return 0
 
 
+def _matches_marks_incomplete(vehicle):
+    vehicle_id = int(vehicle.intCD)
+    cache_key = (vehicle_id, DOSSIER_CACHE_GENERATION)
+    if cache_key in MARKS_INCOMPLETE_CACHE:
+        return MARKS_INCOMPLETE_CACHE[cache_key]
+    try:
+        level = int(vehicle.level) if vehicle.level is not None else 0
+    except (TypeError, ValueError):
+        LOGGER.debug('Invalid level for vehicle %d: %s', vehicle_id, getattr(vehicle, 'level', None))
+        return False
+    if level < 5:
+        MARKS_INCOMPLETE_CACHE[cache_key] = False
+        return False
+    vehicle_dossier = _get_vehicle_dossier(vehicle_id, respect_refresh_limit=True)
+    if vehicle_dossier is None:
+        return True
+    result = _marks_on_gun(vehicle_dossier) < 3
+    MARKS_INCOMPLETE_CACHE[cache_key] = result
+    return result
+
+
+def _alpha_cache_key(vehicle):
+    try:
+        descriptor = getattr(vehicle, 'descriptor', None)
+        if descriptor is None:
+            descriptor = getattr(vehicle, 'typeDescriptor', None)
+        gun = getattr(descriptor, 'gun', None) if descriptor is not None else None
+        if gun is None:
+            return None
+        shells = []
+        for shot in gun.shots:
+            shell = getattr(shot, 'shell', None)
+            if shell is None and isinstance(shot, dict):
+                shell = shot.get('shell')
+            shells.append(getattr(shell, 'compactDescr', None))
+        shells = tuple(shells)
+        return (int(vehicle.intCD), gun.compactDescr, shells)
+    except Exception:
+        return None
+
+
 def _alpha_damage(vehicle):
     """Return nominal alpha damage using the same vehicle params source as the hangar panel."""
+    cache_key = _alpha_cache_key(vehicle)
+    if cache_key is not None and cache_key in ALPHA_DAMAGE_CACHE:
+        ALPHA_DAMAGE_STATS['hits'] += 1
+        return ALPHA_DAMAGE_CACHE[cache_key]
+    ALPHA_DAMAGE_STATS['computed'] += 1
+
     def _from_params(vehicle_like):
         if vehicle_like is None:
             return None
@@ -1022,12 +1099,17 @@ def _alpha_damage(vehicle):
             pass
         return None
 
-    for candidate in (vehicle,
-     SERVICES.itemsCache.items.getItemByCD(vehicle.intCD) if SERVICES.itemsCache else None,
-     SERVICES.itemsCache.items.getStockVehicle(vehicle.intCD) if SERVICES.itemsCache else None):
+    candidates = (
+        lambda: vehicle,
+        lambda: SERVICES.itemsCache.items.getItemByCD(vehicle.intCD) if SERVICES.itemsCache else None,
+        lambda: SERVICES.itemsCache.items.getStockVehicle(vehicle.intCD) if SERVICES.itemsCache else None,
+    )
+    for get_candidate in candidates:
         try:
-            result = _from_params(candidate)
+            result = _from_params(get_candidate())
             if result is not None and result > 0:
+                if cache_key is not None:
+                    ALPHA_DAMAGE_CACHE[cache_key] = result
                 return result
         except Exception:
             pass
@@ -1115,24 +1197,10 @@ def _build_stats(vehicle, account_random_stats, vehicle_cuts):
     marks_on_gun = 0.0
     marks_on_gun_level = 0
     try:
-        # Use cache to avoid redundant dossier lookups
-        cache_key = (vehicle.intCD, DOSSIER_CACHE_GENERATION)
-        if cache_key not in DOSSIER_CACHE:
-            # Limit concurrent dossier fetches to prevent UI blocking on large fleets
-            if DOSSIER_FETCH_COUNTER >= MAX_DOSSIER_FETCHES_PER_REFRESH:
-                LOGGER.debug('Dossier fetch limit reached for this refresh cycle (vehicle %d deferred)', vehicle.intCD)
-                raise Exception('Dossier fetch rate limit (MAX=%d)' % MAX_DOSSIER_FETCHES_PER_REFRESH)
-            DOSSIER_FETCH_COUNTER += 1  # Increment BEFORE fetch to prevent off-by-one
-            vehicle_dossier = SERVICES.itemsCache.items.getVehicleDossier(vehicle.intCD)
-            if vehicle_dossier is None:
-                LOGGER.debug('Dossier unavailable for vehicle %d', vehicle.intCD)
-                DOSSIER_CACHE[cache_key] = None
-                raise Exception('Dossier unavailable for vehicle %d' % vehicle.intCD)
-            DOSSIER_CACHE[cache_key] = vehicle_dossier
-        else:
-            vehicle_dossier = DOSSIER_CACHE[cache_key]
-            if vehicle_dossier is None:
-                raise Exception('Cached dossier is None for vehicle %d' % vehicle.intCD)
+        vehicle_dossier = _get_vehicle_dossier(vehicle.intCD, respect_refresh_limit=True)
+        if vehicle_dossier is None:
+            LOGGER.debug('Dossier stats unavailable or deferred for vehicle %d', vehicle.intCD)
+            raise Exception('Dossier unavailable for vehicle %d' % vehicle.intCD)
         
         try:
             random_stats = vehicle_dossier.getRandomStats()
@@ -1557,18 +1625,7 @@ def _matches(filter_id, vehicle):
             return False
     elif filter_id == 'marks_incomplete':
         try:
-            try:
-                level = int(vehicle.level) if vehicle.level is not None else 0
-            except (TypeError, ValueError):
-                LOGGER.debug('Invalid level for vehicle %d: %s', vehicle.intCD, vehicle.level)
-                return False
-            if level < 5:
-                return False
-            vehicle_dossier = SERVICES.itemsCache.items.getVehicleDossier(vehicle.intCD)
-            if vehicle_dossier is None:
-                return False
-            marks = _marks_on_gun(vehicle_dossier)
-            return marks < 3
+            return _matches_marks_incomplete(vehicle)
         except Exception:
             return False
     elif filter_id == 'crew_not_maxed':
@@ -1579,13 +1636,22 @@ def _matches(filter_id, vehicle):
     return False
 
 
-def _filter_count(filter_id, vehicles):
+def _filter_count(filter_id, vehicles, match_cache=None):
     active_filters = set(ACTIVE_FILTERS)
     if filter_id == 'all':
         required_filters = active_filters
     else:
         required_filters = active_filters | set((filter_id,))
-    return sum((1 for vehicle in vehicles if all((_matches(current_filter, vehicle) for current_filter in required_filters))))
+
+    def matches_cached(current_filter, vehicle):
+        if match_cache is None:
+            return _matches(current_filter, vehicle)
+        cache_key = (current_filter, id(vehicle))
+        if cache_key not in match_cache:
+            match_cache[cache_key] = _matches(current_filter, vehicle)
+        return match_cache[cache_key]
+
+    return sum((1 for vehicle in vehicles if all((matches_cached(current_filter, vehicle) for current_filter in required_filters))))
 
 
 def _set_filter_state(filter_id):
@@ -1670,8 +1736,9 @@ def _apply_msa_filter_settings(settings):
 
 
 def _build_payload():
-    global LAST_DATA_SUMMARY, LAST_PAYLOAD, LAST_PAYLOAD_SIGNATURE, DOSSIER_FETCH_COUNTER
+    global LAST_DATA_SUMMARY, LAST_PAYLOAD, LAST_PAYLOAD_SIGNATURE, DOSSIER_FETCH_COUNTER, DOSSIER_LIMIT_LOGGED
     DOSSIER_FETCH_COUNTER = 0  # Reset fetch counter for this refresh cycle
+    DOSSIER_LIMIT_LOGGED = False
     # Outside the standard hangar the JS layer only needs the inactive flag to
     # drop its global decorations. Skip the expensive dossier/stats build.
     if not _is_hangar_context_active():
@@ -1722,8 +1789,17 @@ def _build_payload():
         vehicle_cuts = {}
     stats = {}
     if stats_enabled:
+        stats_started = time.time()
+        alpha_stats_before = dict(ALPHA_DAMAGE_STATS)
         for vehicle in values:
             stats[str(vehicle.intCD)] = _build_stats(vehicle, account_random_stats, vehicle_cuts)
+        stats_elapsed_ms = int((time.time() - stats_started) * 1000)
+        alpha_computed = ALPHA_DAMAGE_STATS['computed'] - alpha_stats_before['computed']
+        if alpha_computed or stats_elapsed_ms >= 1000:
+            LOGGER.info('Card stats built for %d vehicles in %d ms (alpha damage: %d reused, %d computed)',
+                        len(values), stats_elapsed_ms,
+                        ALPHA_DAMAGE_STATS['hits'] - alpha_stats_before['hits'],
+                        alpha_computed)
 
     summary = (len(values), len(stats), sum((1 for value in stats.values() if value.get('battles', 0) > 0)))
     # Only log if vehicle count or stats changed (not every single refresh)
@@ -1733,8 +1809,9 @@ def _build_payload():
     
     # HCC badges intentionally count HCC filters against the complete inventory.
     filters = []
+    filter_match_cache = {}
     for filter_id in FILTER_ORDER:
-        count = _filter_count(filter_id, values)
+        count = _filter_count(filter_id, values, match_cache=filter_match_cache)
         filters.append({'id': filter_id, 'count': count})
     
     LAST_PAYLOAD = {'version': MOD_VERSION,

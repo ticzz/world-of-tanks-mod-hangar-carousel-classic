@@ -159,5 +159,7 @@ Recommended workflow:
 - Three- and four-row layout CSS targets only the patched native vehicle-carousel page, so unrelated carousels in mode-specific hangar UI are not resized.
 - Defensive error handling around game services access.
 - Hot-reload cleanup for callbacks/providers/models.
-- Dossier fetch rate limiting to reduce UI blocking risk in large garages.
+- The native rented filter keeps the client's selection behavior so selecting it does not hide owned vehicles when no rentals are available.
+- Alpha-damage results are cached by vehicle, gun, and shell setup; vehicle item lookups are lazy and card-stat build time/cache activity is logged when useful.
+- Dossier lookups, marks-incomplete results, and filter matches are reused to avoid duplicate garage-wide work. Dossier fetches remain capped at 256 per payload; unknown marks results stay visible and the cap is logged once per payload.
 - Legacy config migration path to current schema.

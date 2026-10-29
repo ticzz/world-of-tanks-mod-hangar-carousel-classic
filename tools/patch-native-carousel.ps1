@@ -82,10 +82,6 @@ if ($profile.Name -eq '2.4.1.0') {
             'r={...e.primitives(["defaultFilters","hccCarouselAuto","hccSortJson"])},'
         ),
         @(
-            'if(!s&&P(t)&&!a?.fromWotPlus)return!1;',
-            'if(s?(!P(t)||a?.fromWotPlus):P(t)&&!a?.fromWotPlus)return!1;'
-        ),
-        @(
             'o={...e.primitives(["carouselRowCount"]),filters:rn.box(n,{deep:!1}),searchName:rn.box(s?.[0]??""),nations:e.arrayClone("nationsOrder")};',
             'o={...e.primitives(["carouselRowCount"]),hccCarouselAuto:r.hccCarouselAuto,hccSortJson:r.hccSortJson,filters:rn.box(n,{deep:!1}),searchName:rn.box(s?.[0]??""),nations:e.arrayClone("nationsOrder")};'
         ),
@@ -152,10 +148,6 @@ else {
     @(
         'r={...t.primitives(["defaultFilters"])},',
         'r={...t.primitives(["defaultFilters","hccCarouselAuto","hccSortJson"])},'
-    ),
-    @(
-        'if(!s&&z(t)&&!a?.fromWotPlus)return!1;',
-        'if(s?(!z(t)||a?.fromWotPlus):z(t)&&!a?.fromWotPlus)return!1;'
     ),
     @(
         'l={...t.primitives(["carouselRowCount"]),filters:e.box(i,{deep:!1}),searchName:e.box(n?.[0]??""),nations:t.arrayClone("nationsOrder")};',
