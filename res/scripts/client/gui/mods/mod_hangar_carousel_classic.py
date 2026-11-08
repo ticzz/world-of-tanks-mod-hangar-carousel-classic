@@ -12,11 +12,12 @@ import logging
 import os
 import random
 import time
+import tempfile
 import zipfile
 import BigWorld
 import BattleReplay
 from PlayerEvents import g_playerEvents
-from helpers import getClientLanguage, getPreferencesDirPath
+from helpers import getClientLanguage, getPreferencesDirPath, getClientVersion
 from dossiers2.ui.achievements import MARK_ON_GUN_RECORD
 from frameworks.wulf import ViewModel
 from gui.impl.gen.view_models.views.lobby.hangar.sub_views.vehicle_filter_model import VehicleFilterModel
@@ -26,8 +27,10 @@ from gui.impl.lobby.hangar.presenters.vehicle_filters_presenter import VehicleFi
 from gui.impl.lobby.hangar.presenters.vehicle_statistics_presenter import VehiclesStatisticsPresenter
 from gui.impl.lobby.hangar.presenters.vehicle_playlists_presenter import VehiclePlaylistsPresenter
 from gui.impl.lobby.tooltips.carousel_vehicle_tooltip import CarouselVehicleTooltipView
-from gui.shared.items_parameters import params_helper as items_params_helper
+from gui.shared.items_parameters.params import VehicleParams
+from gui.shared.items_parameters.functions import getKpiFactors
 from gui.shared.items_cache import CACHE_SYNC_REASON
+from gui.shared.gui_items import GUI_ITEM_TYPE
 from gui.veh_post_progression.models.progression import PostProgressionCompletion
 from gui.veh_post_progression.models.ext_money import ExtendedMoney
 from gui.veh_post_progression.models.progression_step import PostProgressionStepState
@@ -46,7 +49,7 @@ try:
 except Exception:
     carousel_filter_module = None
 MOD_ID = 'mod_hangar_carousel_classic'
-MOD_VERSION = '1.0.23'
+MOD_VERSION = '1.0.24'
 MOD_LINKAGE_ID = 'mod_hangar.carousel.classic'
 PLAYLIST_ID_PREFIX = 'mhcc_'
 PREFERENCES_DIR = getPreferencesDirPath()
@@ -78,7 +81,8 @@ NATIVE_RESOURCE_HASHES = (
           '8FF6818718F1DBB5E6954F83B3C64E3CB32B584F771BA7AF5355EF81AC803902',
           'F9A373D36D8B17D4067A1852FD971B7D102C3662F60983B3257ADE152B7D0E9A')),
         ('res/packages/gui-part2.pkg', 'gui/gameface/_dist/production/mono/hangar/main/bundle.js',
-         ('0F70F90D3ED8154F46BAE0C02D13497C8CC2134035205B2D9FD1DC5EF511DF47',))
+         ('0F70F90D3ED8154F46BAE0C02D13497C8CC2134035205B2D9FD1DC5EF511DF47',
+          'BC947B3D9EE261181F8903AFC297F34451F5A0328875F92DDA3F5C3FFDC044DC'))
     ),
     (
         ('res/packages/gui-part4.pkg', 'gui/gameface/_dist/production/mono/hangar/views/vehicle_tooltip/vehicle_tooltip.html/bundle.js',
@@ -93,7 +97,7 @@ NATIVE_RESOURCE_HASHES = (
     (
         ('res/packages/gui-part2.pkg', 'gui/gameface/_dist/production/mono/hangar/vehicle_tooltip/vehicle_tooltip.css',
          ('4D9D45F739F642F5CCD443386722045F319EC873352B159B36BAEA210249D822',
-          'FED446477AD05AFC9556AC3FD92DF45573E8F9121466A562105BAAF695C61726'))
+          'FED446477AD05AFC9556AC3FD92DF45573E8F9121466A562105BAAF695C61726')),
     )
 )
 DEFAULT_CONFIG = {'schemaVersion': 5,
@@ -375,6 +379,7 @@ ACTIVE_FILTERS = set((filter_id for filter_id in RUNTIME_STATE.get('activeFilter
 MODELS = []
 FILTER_PROVIDERS = []
 STATISTICS_PRESENTERS = []
+INVENTORY_WAIT_STATE = None
 CALLBACK_IDS = []
 FINAL_VISIBLE_VEHICLE_COUNT = None
 LAST_DATA_SUMMARY = None
@@ -400,10 +405,11 @@ DOSSIER_CACHE = {}
 MARKS_INCOMPLETE_CACHE = {}
 ALPHA_DAMAGE_CACHE = {}
 ALPHA_DAMAGE_STATS = {'hits': 0, 'computed': 0}
+PERSISTENT_ALPHA_PATH = os.path.join(PREFERENCES_DIR, 'mods', 'mod_hangar_carousel_classic',
+                                    'alpha_cache.json')
+PERSISTENT_ALPHA_STATE = {'loaded': False, 'version': None, 'entries': {},
+                          'dirty': False, 'scheduled': False, 'disabled': False}
 DOSSIER_CACHE_GENERATION = 0
-DOSSIER_FETCH_COUNTER = 0
-MAX_DOSSIER_FETCHES_PER_REFRESH = 256
-DOSSIER_LIMIT_LOGGED = False
 COMPATIBILITY_WARNING_SHOWN = False
 ITEMS_CACHE_SYNC_BOUND = False
 DOSSIER_RESYNC_BOUND = False
@@ -479,18 +485,10 @@ def _invalidate_dossier_cache(reason='unknown'):
         LOGGER.exception('Unable to invalidate dossier cache (%s)', reason)
 
 
-def _get_vehicle_dossier(vehicle_id, respect_refresh_limit=False):
-    global DOSSIER_FETCH_COUNTER, DOSSIER_LIMIT_LOGGED
+def _get_vehicle_dossier(vehicle_id):
     cache_key = (int(vehicle_id), DOSSIER_CACHE_GENERATION)
     if cache_key in DOSSIER_CACHE:
         return DOSSIER_CACHE[cache_key]
-    if respect_refresh_limit:
-        if DOSSIER_FETCH_COUNTER >= MAX_DOSSIER_FETCHES_PER_REFRESH:
-            if not DOSSIER_LIMIT_LOGGED:
-                DOSSIER_LIMIT_LOGGED = True
-                LOGGER.warning('Dossier fetch limit reached; unavailable vehicle statistics will be deferred')
-            return None
-        DOSSIER_FETCH_COUNTER += 1
     try:
         items = SERVICES.itemsCache.items if SERVICES.itemsCache else None
         dossier = items.getVehicleDossier(cache_key[0]) if items is not None else None
@@ -554,10 +552,33 @@ def _unbind_dossiers_resync():
         DOSSIER_RESYNC_BOUND = False
 
 
-def _on_items_cache_sync_completed(update_reason, *_args, **_kwargs):
-    if update_reason not in (CACHE_SYNC_REASON.DOSSIER_RESYNC, CACHE_SYNC_REASON.STATS_RESYNC):
+def _on_items_cache_sync_completed(update_reason, invalid_items=None, *_args, **_kwargs):
+    if update_reason not in (CACHE_SYNC_REASON.SHOW_GUI, CACHE_SYNC_REASON.CLIENT_UPDATE,
+                             CACHE_SYNC_REASON.SHOP_RESYNC, CACHE_SYNC_REASON.INVENTORY_RESYNC,
+                             CACHE_SYNC_REASON.DOSSIER_RESYNC, CACHE_SYNC_REASON.STATS_RESYNC):
         return
-    _refresh_all_models('account statistics sync', invalidate_dossier=True)
+    if update_reason == CACHE_SYNC_REASON.DOSSIER_RESYNC:
+        _refresh_all_models('items cache sync', invalidate_dossier=True)
+        return
+
+    # Full invalidation also returns an empty mapping, so it cannot be treated
+    # as a partial update with no changed vehicles.
+    full_update = (update_reason != CACHE_SYNC_REASON.CLIENT_UPDATE or not invalid_items)
+    vehicle_ids = set()
+    if not full_update:
+        vehicle_ids.update(invalid_items.get(GUI_ITEM_TYPE.VEHICLE, ()))
+
+    def refresh_items():
+        # Native components must finish processing this same sync event first.
+        # Native invalidation includes vehicles affected by crew/loadout KPIs.
+        if full_update:
+            ALPHA_DAMAGE_CACHE.clear()
+        else:
+            for key in list(ALPHA_DAMAGE_CACHE):
+                if key[0] in vehicle_ids:
+                    del ALPHA_DAMAGE_CACHE[key]
+        _refresh_all_models('items cache sync', invalidate_dossier=True)
+    _register_callback(0.0, refresh_items)
 
 
 def _bind_items_cache_sync():
@@ -617,17 +638,15 @@ def _set_native_provider_rows(provider, rows):
 
 
 def _refresh_native_provider(provider):
-    update_vehicles = _native_provider_method(provider, '_VehicleFiltersDataProvider__updateVehicles')
     update_carousel = _native_provider_method(provider, '_VehicleFiltersDataProvider__updateCarousel')
-    if update_vehicles is None or update_carousel is None:
+    if update_carousel is None:
         return False
-    update_vehicles()
     update_carousel()
     return True
 
 
 def fini():
-    global SETTINGS_REGISTERED, DOSSIER_CACHE_GENERATION, DOSSIER_FETCH_COUNTER, DOSSIER_LIMIT_LOGGED, FINAL_VISIBLE_VEHICLE_COUNT, LAST_DATA_SUMMARY, LAST_PAYLOAD, LAST_PAYLOAD_SIGNATURE, TOOLTIP_PAYLOAD_LOGGED, LEGACY_PLAYLISTS_REMOVED, CONFIG, RUNTIME_STATE, ACTIVE_FILTERS, MSA_API, MSA_SETTINGS, MSA_SYNCING
+    global SETTINGS_REGISTERED, DOSSIER_CACHE_GENERATION, FINAL_VISIBLE_VEHICLE_COUNT, LAST_DATA_SUMMARY, LAST_PAYLOAD, LAST_PAYLOAD_SIGNATURE, TOOLTIP_PAYLOAD_LOGGED, LEGACY_PLAYLISTS_REMOVED, CONFIG, RUNTIME_STATE, ACTIVE_FILTERS, MSA_API, MSA_SETTINGS, MSA_SYNCING, INVENTORY_WAIT_STATE
     try:
         g_playerEvents.onAvatarReady -= _track_last_played
     except Exception:
@@ -639,6 +658,7 @@ def fini():
         pass
     _unbind_dossiers_resync()
     _unbind_items_cache_sync()
+    _save_persistent_alpha_cache()
     while CALLBACK_IDS:
         callback_id = CALLBACK_IDS.pop()
         try:
@@ -650,13 +670,14 @@ def fini():
     MODELS[:] = []
     FILTER_PROVIDERS[:] = []
     STATISTICS_PRESENTERS[:] = []
+    INVENTORY_WAIT_STATE = None
     FINAL_VISIBLE_VEHICLE_COUNT = None
     DOSSIER_CACHE.clear()
     MARKS_INCOMPLETE_CACHE.clear()
     ALPHA_DAMAGE_CACHE.clear()
+    PERSISTENT_ALPHA_STATE.update(loaded=False, version=None, entries={},
+                                  dirty=False, scheduled=False, disabled=False)
     DOSSIER_CACHE_GENERATION += 1
-    DOSSIER_FETCH_COUNTER = 0
-    DOSSIER_LIMIT_LOGGED = False
     LAST_DATA_SUMMARY = None
     LAST_PAYLOAD = None
     LAST_PAYLOAD_SIGNATURE = None
@@ -844,6 +865,8 @@ def _current_carousel_payload(total_vehicles=0):
 
 
 def _publish_payload(payload):
+    if payload is None:
+        return
     state_json = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
     active_filters_json = json.dumps(sorted(ACTIVE_FILTERS), separators=(',', ':'))
     for model in list(MODELS):
@@ -858,6 +881,9 @@ def _build_lightweight_payload():
     if not _is_hangar_context_active():
         return {'version': MOD_VERSION, 'enabled': False, 'hangarActive': False}
     if not LAST_PAYLOAD or LAST_PAYLOAD.get('hangarActive') is False:
+        return _build_payload()
+    stats_enabled = bool(CONFIG.get('cardStats', {}).get('enabled', True))
+    if stats_enabled != bool(LAST_PAYLOAD.get('statsConfig', {}).get('enabled', True)):
         return _build_payload()
     total_vehicles = int(LAST_PAYLOAD.get('totalVehicles', 0) or 0)
     payload = dict(LAST_PAYLOAD)
@@ -895,15 +921,12 @@ def _sort_descending():
 
 
 def _refresh_native_vehicle_model():
-    """Refresh native vehicle filter model with current filters."""
-    try:
-        for provider in list(FILTER_PROVIDERS):
-            try:
-                _refresh_native_provider(provider)
-            except Exception:
-                LOGGER.debug('Unable to refresh filter provider')
-    except Exception:
-        LOGGER.debug('Unable to refresh native vehicle model')
+    """Refresh carousel layout; vehicle statistics use their own presenter."""
+    for provider in list(FILTER_PROVIDERS):
+        try:
+            _refresh_native_provider(provider)
+        except Exception:
+            LOGGER.exception('Unable to refresh native carousel filter provider')
 
 
 def _refresh_statistics_presenters():
@@ -924,6 +947,8 @@ def _refresh_statistics_presenters():
 def _sync_sort_property():
     """Sync sorting configuration to all models."""
     sort_json = _build_sort_json()
+    if sort_json is None:
+        return
     for provider in list(FILTER_PROVIDERS):
         try:
             with provider.viewModel.transaction() as model:
@@ -989,13 +1014,25 @@ def _set_carousel_rows(rows, automatic=False, refresh=True):
 
 
 def _inventory_vehicles():
+    global INVENTORY_WAIT_STATE
     for presenter in reversed(list(STATISTICS_PRESENTERS)):
         vehicles_component = getattr(presenter, '_vehiclesComponent', None)
         presenter_vehicles = getattr(vehicles_component, 'vehicles', None)
         if isinstance(presenter_vehicles, dict):
+            if INVENTORY_WAIT_STATE is not None:
+                LOGGER.info('Native statistics vehicle component ready; resuming HCC payload updates')
+                INVENTORY_WAIT_STATE = None
             return presenter_vehicles
-    LOGGER.warning('Native statistics vehicle component unavailable; skipping payload build')
-    return {}
+    wait_state = 'invalid component' if STATISTICS_PRESENTERS else 'presenter loading'
+    if INVENTORY_WAIT_STATE != wait_state:
+        INVENTORY_WAIT_STATE = wait_state
+        if STATISTICS_PRESENTERS:
+            LOGGER.warning('Native statistics presenter has no valid vehicle component; '
+                           'preserving HCC state until a native update')
+        else:
+            LOGGER.info('Waiting for native statistics presenter; '
+                        'HCC payload will load on its native update')
+    return None
 
 def _marks_on_gun(vehicle_dossier):
     try:
@@ -1041,12 +1078,134 @@ def _matches_marks_incomplete(vehicle):
     if level < 5:
         MARKS_INCOMPLETE_CACHE[cache_key] = False
         return False
-    vehicle_dossier = _get_vehicle_dossier(vehicle_id, respect_refresh_limit=True)
+    vehicle_dossier = _get_vehicle_dossier(vehicle_id)
     if vehicle_dossier is None:
         return True
     result = _marks_on_gun(vehicle_dossier) < 3
     MARKS_INCOMPLETE_CACHE[cache_key] = result
     return result
+
+
+def _load_persistent_alpha_cache():
+    state = PERSISTENT_ALPHA_STATE
+    if state['loaded']:
+        return
+    state['loaded'] = True
+    try:
+        state['version'] = getClientVersion()
+    except Exception:
+        state['disabled'] = True
+        LOGGER.exception('Persistent alpha cache disabled: unable to read client version')
+        return
+    if not state['version']:
+        state['disabled'] = True
+        LOGGER.warning('Persistent alpha cache disabled: client version unavailable')
+        return
+    cache_path = PERSISTENT_ALPHA_PATH
+    if not os.path.isfile(cache_path) and os.path.isfile(cache_path + '.bak'):
+        cache_path += '.bak'
+        LOGGER.warning('Recovering persistent alpha cache from interrupted save')
+    if not os.path.isfile(cache_path):
+        return
+    try:
+        with io.open(cache_path, 'r', encoding='utf-8') as stream:
+            data = json.load(stream)
+        if not isinstance(data, dict):
+            raise ValueError('Expected an alpha-cache object')
+        if data.get('schema') != 1 or data.get('clientVersion') != state['version']:
+            LOGGER.info('Persistent alpha cache ignored: schema or client version changed')
+            return
+        entries = data['entries']
+        if not isinstance(entries, dict):
+            raise ValueError('Expected alpha-cache entries')
+        for key, value in entries.iteritems():
+            if (not isinstance(key, basestring) or len(key) != 64 or
+                    any(c not in '0123456789abcdef' for c in key) or
+                    isinstance(value, bool) or not isinstance(value, (int, long)) or value <= 0):
+                raise ValueError('Invalid alpha-cache entry')
+        state['entries'] = entries
+        LOGGER.info('Persistent alpha cache loaded: %d entries', len(entries))
+    except (IOError, OSError, ValueError, KeyError):
+        LOGGER.exception('Unable to load persistent alpha cache; rebuilding native values')
+
+
+def _save_persistent_alpha_cache():
+    state = PERSISTENT_ALPHA_STATE
+    state['scheduled'] = False
+    if not state['dirty'] or state['disabled']:
+        return
+    started = time.clock()
+    temporary = None
+    try:
+        directory = os.path.dirname(PERSISTENT_ALPHA_PATH)
+        if not os.path.isdir(directory):
+            os.makedirs(directory)
+        descriptor, temporary = tempfile.mkstemp(prefix='alpha_cache-', suffix='.tmp', dir=directory)
+        os.close(descriptor)
+        data = {'schema': 1, 'clientVersion': state['version'], 'entries': state['entries']}
+        with io.open(temporary, 'w', encoding='utf-8') as stream:
+            stream.write(unicode(json.dumps(data, ensure_ascii=True, separators=(',', ':'))))
+            stream.flush()
+            os.fsync(stream.fileno())
+        # WoT has no _ctypes; retain the old file during Windows rename.
+        backup = PERSISTENT_ALPHA_PATH + '.bak'
+        if os.path.isfile(PERSISTENT_ALPHA_PATH):
+            if os.path.isfile(backup):
+                os.remove(backup)
+            os.rename(PERSISTENT_ALPHA_PATH, backup)
+        try:
+            os.rename(temporary, PERSISTENT_ALPHA_PATH)
+        except OSError:
+            if not os.path.isfile(PERSISTENT_ALPHA_PATH) and os.path.isfile(backup):
+                os.rename(backup, PERSISTENT_ALPHA_PATH)
+            raise
+        temporary = None
+        state['dirty'] = False
+        if os.path.isfile(backup):
+            os.remove(backup)
+        LOGGER.info('Persistent alpha cache saved: %d entries in %.3f ms',
+                    len(state['entries']), (time.clock() - started) * 1000)
+    except (IOError, OSError):
+        LOGGER.exception('Unable to save persistent alpha cache')
+    finally:
+        if temporary is not None:
+            try:
+                os.remove(temporary)
+            except OSError:
+                LOGGER.exception('Unable to remove temporary alpha-cache file')
+
+
+def _persistent_alpha_key(vehicle):
+    _load_persistent_alpha_cache()
+    if PERSISTENT_ALPHA_STATE['disabled']:
+        return None
+    try:
+        shell = vehicle.descriptor.shot.shell
+        kpi = getKpiFactors(vehicle)
+        # These are the exact inputs read by native VehicleParams.avgDamage.
+        # Evaluating KPIs avoids the unrelated getVehicleFactors initialization.
+        inputs = (int(vehicle.intCD), shell.compactDescr, shell.armorDamage[0],
+                  shell.damageRandomization,
+                  kpi.getFactor('damageAndPiercingDistributionLowerBound'),
+                  kpi.getFactor('damageAndPiercingDistributionUpperBound'))
+        payload = json.dumps(inputs, allow_nan=False, separators=(',', ':'))
+        return hashlib.sha256(payload).hexdigest()
+    except Exception:
+        LOGGER.debug('Unable to validate persistent alpha inputs for vehicle %s',
+                     getattr(vehicle, 'intCD', 'unknown'), exc_info=True)
+        return None
+
+
+def _remember_persistent_alpha(key, value):
+    if key is None:
+        return
+    state = PERSISTENT_ALPHA_STATE
+    state['entries'][key] = value
+    state['dirty'] = True
+    if not state['scheduled']:
+        state['scheduled'] = True
+        if _register_callback(2.0, _save_persistent_alpha_cache) is None:
+            state['scheduled'] = False
 
 
 def _alpha_cache_key(vehicle):
@@ -1064,62 +1223,63 @@ def _alpha_cache_key(vehicle):
                 shell = shot.get('shell')
             shells.append(getattr(shell, 'compactDescr', None))
         shells = tuple(shells)
-        return (int(vehicle.intCD), gun.compactDescr, shells)
+        active_shot = getattr(descriptor, 'shot', None)
+        active_shell = getattr(active_shot, 'shell', None)
+        return (int(vehicle.intCD), gun.compactDescr, shells,
+                getattr(active_shell, 'compactDescr', None),
+                getattr(descriptor, 'activeGunShotIndex', None))
     except Exception:
         return None
 
 
 def _alpha_damage(vehicle):
-    """Return nominal alpha damage using the same vehicle params source as the hangar panel."""
+    """Read only the native alpha property, without building a crew comparator."""
     cache_key = _alpha_cache_key(vehicle)
     if cache_key is not None and cache_key in ALPHA_DAMAGE_CACHE:
         ALPHA_DAMAGE_STATS['hits'] += 1
         return ALPHA_DAMAGE_CACHE[cache_key]
+    persistent_key = _persistent_alpha_key(vehicle)
+    if persistent_key is not None:
+        cached = PERSISTENT_ALPHA_STATE['entries'].get(persistent_key)
+        if cached is not None:
+            if cache_key is not None:
+                ALPHA_DAMAGE_CACHE[cache_key] = cached
+            ALPHA_DAMAGE_STATS['hits'] += 1
+            ALPHA_DAMAGE_STATS['persistent'] = ALPHA_DAMAGE_STATS.get('persistent', 0) + 1
+            return cached
     ALPHA_DAMAGE_STATS['computed'] += 1
 
     def _from_params(vehicle_like):
         if vehicle_like is None:
             return None
-        try:
-            params = items_params_helper.getParameters(vehicle_like)
-            if isinstance(params, dict):
-                value = params.get('avgDamage')
-                if value is not None:
-                    return int(round(float(value)))
-        except Exception:
-            pass
-        try:
-            comparator = items_params_helper.similarCrewComparator(vehicle_like)
-            if comparator is not None:
-                param = comparator.getExtendedData('avgDamage')
-                value = getattr(param, 'value', None) if param is not None else None
-                if value is not None:
-                    return int(round(float(value)))
-        except Exception:
-            pass
-        return None
+        value = VehicleParams(vehicle_like).avgDamage
+        return int(round(float(value))) if value is not None else None
 
     candidates = (
         lambda: vehicle,
         lambda: SERVICES.itemsCache.items.getItemByCD(vehicle.intCD) if SERVICES.itemsCache else None,
         lambda: SERVICES.itemsCache.items.getStockVehicle(vehicle.intCD) if SERVICES.itemsCache else None,
     )
-    for get_candidate in candidates:
+    for candidate_index, get_candidate in enumerate(candidates):
         try:
             result = _from_params(get_candidate())
             if result is not None and result > 0:
                 if cache_key is not None:
                     ALPHA_DAMAGE_CACHE[cache_key] = result
+                if candidate_index == 0:
+                    _remember_persistent_alpha(persistent_key, result)
                 return result
         except Exception:
-            pass
+            LOGGER.debug('Unable to read native alpha damage for vehicle %s',
+                         getattr(vehicle, 'intCD', 'unknown'), exc_info=True)
 
     try:
         value = _from_params(vehicle)
         if value is not None:
             return value
     except Exception:
-        LOGGER.debug('Unable to extract alpha damage from params_helper for vehicle %s', getattr(vehicle, 'intCD', 'unknown'))
+        LOGGER.debug('Unable to extract native alpha damage for vehicle %s',
+                     getattr(vehicle, 'intCD', 'unknown'), exc_info=True)
 
     try:
         cached_vehicle = SERVICES.itemsCache.items.getItemByCD(vehicle.intCD)
@@ -1128,7 +1288,8 @@ def _alpha_damage(vehicle):
             if value is not None:
                 return value
     except Exception:
-        LOGGER.debug('Unable to extract alpha damage from cached vehicle for %s', getattr(vehicle, 'intCD', 'unknown'))
+        LOGGER.debug('Unable to extract alpha damage from cached vehicle for %s',
+                     getattr(vehicle, 'intCD', 'unknown'), exc_info=True)
 
     try:
         descriptor = getattr(vehicle, 'descriptor', None)
@@ -1153,9 +1314,9 @@ def _alpha_damage(vehicle):
             if shell is None:
                 continue
 
-            damage = getattr(shell, 'damage', None)
+            damage = getattr(shell, 'armorDamage', None)
             if damage is None and isinstance(shell, dict):
-                damage = shell.get('damage')
+                damage = shell.get('armorDamage')
             if not damage:
                 continue
 
@@ -1169,12 +1330,13 @@ def _alpha_damage(vehicle):
             except Exception:
                 continue
     except Exception:
-        LOGGER.debug('Unable to extract alpha damage for vehicle %s', getattr(vehicle, 'intCD', 'unknown'))
+        LOGGER.debug('Unable to extract alpha damage for vehicle %s',
+                     getattr(vehicle, 'intCD', 'unknown'), exc_info=True)
+    LOGGER.warning('Alpha damage unavailable for vehicle %s', getattr(vehicle, 'intCD', 'unknown'))
     return 0
 
 
 def _build_stats(vehicle, account_random_stats, vehicle_cuts):
-    global DOSSIER_FETCH_COUNTER
     battles = 0
     wins = 0
     dossier_battles = None
@@ -1197,9 +1359,9 @@ def _build_stats(vehicle, account_random_stats, vehicle_cuts):
     marks_on_gun = 0.0
     marks_on_gun_level = 0
     try:
-        vehicle_dossier = _get_vehicle_dossier(vehicle.intCD, respect_refresh_limit=True)
+        vehicle_dossier = _get_vehicle_dossier(vehicle.intCD)
         if vehicle_dossier is None:
-            LOGGER.debug('Dossier stats unavailable or deferred for vehicle %d', vehicle.intCD)
+            LOGGER.debug('Dossier stats unavailable for vehicle %d', vehicle.intCD)
             raise Exception('Dossier unavailable for vehicle %d' % vehicle.intCD)
         
         try:
@@ -1406,6 +1568,8 @@ def _build_sort_json(account_random_stats=None, vehicle_cuts=None):
     applied_criteria = list(sorting_criteria)
     
     vehicles = _inventory_vehicles()
+    if vehicles is None:
+        return None
     
     # Fetch account stats if not provided
     if account_random_stats is None:
@@ -1736,9 +1900,7 @@ def _apply_msa_filter_settings(settings):
 
 
 def _build_payload():
-    global LAST_DATA_SUMMARY, LAST_PAYLOAD, LAST_PAYLOAD_SIGNATURE, DOSSIER_FETCH_COUNTER, DOSSIER_LIMIT_LOGGED
-    DOSSIER_FETCH_COUNTER = 0  # Reset fetch counter for this refresh cycle
-    DOSSIER_LIMIT_LOGGED = False
+    global LAST_DATA_SUMMARY, LAST_PAYLOAD, LAST_PAYLOAD_SIGNATURE
     # Outside the standard hangar the JS layer only needs the inactive flag to
     # drop its global decorations. Skip the expensive dossier/stats build.
     if not _is_hangar_context_active():
@@ -1748,15 +1910,15 @@ def _build_payload():
         vehicles = _inventory_vehicles()
     except Exception as e:
         LOGGER.error('Failed to get inventory vehicles: %s', e)
-        return {}
-    if vehicles is None or not vehicles:
-        LOGGER.warning('Inventory vehicles unavailable or empty; skipping payload build')
-        return {}
+        return None
+    if vehicles is None:
+        return None
     values = list(vehicles.values())
     stats_config = _normalized_card_stats_config(CONFIG.get('cardStats', {}))
     stats_enabled = bool(stats_config.get('enabled', True))
     try:
-        vehicle_signature = tuple(sorted((int(vehicle.intCD) for vehicle in values)))
+        vehicle_signature = tuple(sorted((int(vehicle.intCD), _alpha_cache_key(vehicle))
+                                         for vehicle in values))
     except Exception:
         vehicle_signature = tuple()
     payload_signature = (
@@ -1879,6 +2041,8 @@ class HangarCarouselClassicModel(ViewModel):
         try:
             _remove_legacy_playlists()
             payload = _build_payload()
+            if payload is None:
+                return
             self.setStateJson(json.dumps(payload, ensure_ascii=False, separators=(',', ':')))
             self.setActiveFiltersJson(json.dumps(sorted(ACTIVE_FILTERS), separators=(',', ':')))
         except Exception:
@@ -1955,7 +2119,8 @@ def _patch_vehicle_filter_model():
             LOGGER.exception('Unable to inject Gameface assets; carousel features may be unavailable')
         self._addViewModelProperty('hangarCarouselClassic', HangarCarouselClassicModel())
         self._addBoolProperty('hccCarouselAuto', _carousel_auto())
-        self._addStringProperty('hccSortJson', _build_sort_json())
+        sort_json = _build_sort_json()
+        self._addStringProperty('hccSortJson', sort_json if sort_json is not None else '{}')
 
     def get_hcc_carousel_auto(self):
         return self._getBool(6)
@@ -2097,7 +2262,9 @@ def _reapply_provider_carousel_state(provider):
     try:
         with provider.viewModel.transaction() as model:
             model.setHccCarouselAuto(_carousel_auto())
-            model.setHccSortJson(_build_sort_json())
+            sort_json = _build_sort_json()
+            if sort_json is not None:
+                model.setHccSortJson(sort_json)
     except Exception:
         LOGGER.exception('Unable to sync HCC properties in VehicleFilterModel')
     try:
@@ -2170,7 +2337,9 @@ def _patch_vehicle_filters_provider():
         try:
             with self.viewModel.transaction() as model:
                 model.setHccCarouselAuto(_carousel_auto())
-                model.setHccSortJson(_build_sort_json())
+                sort_json = _build_sort_json()
+                if sort_json is not None:
+                    model.setHccSortJson(sort_json)
         except Exception:
             LOGGER.exception('Unable to initialize HCC properties in VehicleFilterModel')
         try:

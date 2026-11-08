@@ -8,6 +8,7 @@ This document contains the full technical details that were intentionally moved 
 - Adds configurable carousel row handling (1-4 rows and auto mode).
 - Adds card statistics overlays (battles, win rate, average damage, alpha damage, mastery, marks on gun).
 - Integrates with native Gameface model properties and patched native bundles.
+- JS/CSS injection uses `gf_mod_inject` on the native carousel model. HCC does not register a standalone WULF layout or HTML view. The obsolete `gui/gen_resources/hangar_carousel_classic.json` entry must not be packaged: it lacks the required resource `id` and references nonexistent HTML, producing a WULF startup parse error.
 - Provides a hierarchical sorting schema that is XVM-compatible by design, but does not require XVM.
 - Adds practical filter toggles in the hangar UI.
 
@@ -42,7 +43,7 @@ Configurable fields:
 
 Minimum battles threshold is configurable.
 
-Card statistics refresh after the client completes a dossier or account-stats cache sync. This also covers battle results that arrive after returning to the hangar, rather than relying only on the immediate post-return refreshes.
+Card statistics refresh after the client completes a dossier or account-stats cache sync. This also covers battle results that arrive after returning to the hangar, rather than relying only on the immediate post-return refreshes. Partial client updates invalidate alpha entries only for `invalidItems[GUI_ITEM_TYPE.VEHICLE]`; the native requester resolves loadout, crew, and field-modification dependencies to vehicle compact descriptors. Nonvehicle partial updates retain alpha entries. GUI, inventory, shop, account-stats resyncs, and empty/missing client-update mappings clear all alpha entries: full native invalidation also returns an empty mapping, so it cannot safely imply no changes. Their refresh runs on a tracked next-tick callback after native inventory components process the sync. Dossier-only syncs preserve alpha results. Toggling card statistics rebuilds their payload; changes only to display fields remain lightweight.
 
 ### Filters
 
@@ -160,6 +161,9 @@ Recommended workflow:
 - Defensive error handling around game services access.
 - Hot-reload cleanup for callbacks/providers/models.
 - The native rented filter keeps the client's selection behavior so selecting it does not hide owned vehicles when no rentals are available.
-- Alpha-damage results are cached by vehicle, gun, and shell setup; vehicle item lookups are lazy and card-stat build time/cache activity is logged when useful.
-- Dossier lookups, marks-incomplete results, and filter matches are reused to avoid duplicate garage-wide work. Dossier fetches remain capped at 256 per payload; unknown marks results stay visible and the cap is logged once per payload.
+- Alpha-damage results use the native `VehicleParams.avgDamage` property, without a similar-crew comparator. Results are cached by vehicle, gun, shell setup, and selected shot, with sync-driven invalidation for KPI changes. The card-payload signature includes this setup so a gun/shot change cannot reuse old card values. Vehicle item lookups remain lazy and card-stat build time/cache activity is logged when useful.
+- A preferences-based `alpha_cache.json` also persists native results across sessions. On an in-memory miss, a SHA256 key validates vehicle/shell identity, `armorDamage[0]`, `damageRandomization`, and the two distribution factors from native `getKpiFactors`. These are the inputs read by the inspected `avgDamage` formula; no custom damage formula or manual crew fingerprint is introduced. Unchanged inputs bypass `VehicleParams` entirely, while changed/new inputs use it normally. The cache is shared safely across accounts by these complete alpha inputs without storing account identifiers. Client version and schema guard against formula updates.
+- Persistent writes are batched after two seconds and at finalization, flushed to a temporary file and installed using standard-library backup/rename. WoT lacks `_ctypes`, so Windows `MoveFileExW` is not used. Failed replacement restores the previous file; loading recovers `.bak` if interruption left the main path absent. Replacement is recoverable, not a single atomic operation. Load/write failures are logged. Only successful primary-vehicle results are persisted, not cached/stock fallback values. Diagnostic `alpha_persistent_reused` counts disk-cache hits and `alpha_fingerprint_ms` measures input-validation cost inside `alpha_ms`. The first population incurs extra KPI validation; real second-start savings require an in-game measurement.
+- Native inventory not yet available is distinct from a ready empty inventory: both HCC card-state and native sort/filter updates are deferred while waiting. The native statistics update resumes publication; initial filter models use neutral `{}` instead of an active empty allowlist.
+- Dossier lookups, marks-incomplete results, and filter matches are reused to avoid duplicate garage-wide work. Dossiers are cached per vehicle and cache generation without a vehicle-count cap, so large garages receive complete marks-filter checks and card statistics. Genuinely unavailable dossiers retain the existing fallback behavior.
 - Legacy config migration path to current schema.

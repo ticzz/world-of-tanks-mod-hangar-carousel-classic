@@ -102,7 +102,6 @@ if (-not (Test-Path -LiteralPath $Python27)) {
 Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path `
     (Join-Path $stage 'res\scripts\client\gui\mods'), `
-    (Join-Path $stage 'res\gui\gen_resources'), `
     (Join-Path $stage 'res\gui\gameface\mods\hcc\hangar_carousel_classic'), `
     (Split-Path -Parent $mainBundleOutput), `
     (Split-Path -Parent $comp7BundleOutput), `
@@ -122,8 +121,6 @@ if ($LASTEXITCODE -ne 0) {
 $compiled = "$pythonSource`c"
 
 Copy-Item -LiteralPath (Join-Path $repo 'meta.xml') -Destination (Join-Path $stage 'meta.xml')
-Copy-Item -LiteralPath (Join-Path $repo 'res\gui\gen_resources\hangar_carousel_classic.json') `
-    -Destination (Join-Path $stage 'res\gui\gen_resources\hangar_carousel_classic.json')
 Copy-Item -LiteralPath $compiled -Destination (Join-Path $stage 'res\scripts\client\gui\mods\mod_hangar_carousel_classic.pyc')
 Copy-Item -LiteralPath (Join-Path $repo 'res\gui\gameface\mods\hcc\hangar_carousel_classic\hangar_carousel_classic.js') `
     -Destination (Join-Path $stage 'res\gui\gameface\mods\hcc\hangar_carousel_classic\hangar_carousel_classic.js')

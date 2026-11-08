@@ -14,7 +14,10 @@ $profiles = @(
         Name = '2.4.1.0'
         PackagePath = Join-Path $GameRoot 'res\packages\comp7.pkg'
         EntryPath = 'comp7/gui/gameface/_dist/production/mono/lobby/hangar/bundle.js'
-        SupportedHashes = @('20BF8862B0B5DFDEB79CCFF666725FF76F731E855F0A4D2BFD9C28A19759B172')
+        SupportedHashes = @(
+            '20BF8862B0B5DFDEB79CCFF666725FF76F731E855F0A4D2BFD9C28A19759B172',
+            '0CF0AD68AB8A463E6CEF566132090760CC4EF4FD35038AA3982611FFAD67A34C'
+        )
     },
     @{
         Name = '2.4.0.x'
