@@ -45,12 +45,14 @@ class InventoryLifecycleTests(unittest.TestCase):
             tree = ast.parse(stream.read(), source)
         names = ('_inventory_vehicles', '_build_payload', '_publish_payload',
                  '_patch_vehicle_statistics_presenter', '_add_safe_provider',
+                 '_is_frontline_filter', '_is_frontline_hangar_active',
+                 '_is_allowed_hangar_path', '_is_hangar_context_active',
                  '_normalized_card_stats_config', '_refresh_all_models',
                  '_native_provider_method', '_refresh_native_provider',
                  '_refresh_native_vehicle_model', '_refresh_statistics_presenters',
                  '_set_filter_state', '_build_lightweight_payload', '_build_sort_json',
                  '_sync_sort_property', '_on_items_cache_sync_completed',
-                 '_invalidate_dossier_cache')
+                 '_invalidate_dossier_cache', '_patch_items_invalidation')
         nodes = [node for node in tree.body
                  if isinstance(node, ast.FunctionDef) and node.name in names]
         self.assertEqual(len(nodes), len(names))
@@ -74,6 +76,10 @@ class InventoryLifecycleTests(unittest.TestCase):
             'DOSSIER_CACHE_GENERATION': 0, 'FILTER_ORDER': [],
             'DOSSIER_CACHE': {}, 'MARKS_INCOMPLETE_CACHE': {},
             'ALPHA_DAMAGE_CACHE': {}, 'ALPHA_DAMAGE_STATS': {'hits': 0, 'computed': 0},
+            'ITEMS_INVALIDATION_CONTEXT': {'result': None, 'full': True},
+            'dependency': None, 'IHangarSpace': None,
+            'HANGAR_GUARD_STATE': {'active': None, 'spacePath': None},
+            'ALLOWED_HANGAR_PREFIXES': ('spaces/hangar_v4', 'spaces/h33_comp7'),
             'time': time,
             '_register_callback': lambda delay, callback: self.callbacks.append(callback),
             '_alpha_cache_key': lambda vehicle: getattr(vehicle, 'setup', None),
@@ -142,6 +148,32 @@ class InventoryLifecycleTests(unittest.TestCase):
         self.assertEqual(payload['totalVehicles'], 0)
         self.assertEqual(payload['stats'], {})
         self.assertTrue(payload['hangarActive'])
+
+    def test_frontline_hangar_is_detected_from_its_native_filter(self):
+        frontline_filter_class = type(
+            'BattleCarouselFilter', (), {'__module__': 'frontline.gui.carousel_filter'})
+        frontline_filter = frontline_filter_class()
+        provider = type('Provider', (), {
+            '_VehicleFiltersDataProvider__filter': frontline_filter})()
+        self.ns['FILTER_PROVIDERS'].append(provider)
+        space = type('HangarSpace', (), {'spacePath': 'spaces/frontline'})()
+        self.ns['dependency'] = type('Dependency', (), {
+            'instance': lambda self, interface: space})()
+        self.ns['IHangarSpace'] = object()
+        self.ns['HANGAR_GUARD_STATE'] = {'active': None, 'spacePath': None}
+        self.ns['ALLOWED_HANGAR_PREFIXES'] = ('spaces/hangar_v4', 'spaces/h33_comp7')
+
+        self.assertTrue(self.ns['_is_frontline_filter'](provider))
+        self.assertTrue(self.ns['_is_frontline_hangar_active']())
+        self.assertTrue(self.ns['_is_hangar_context_active']())
+
+        standard_filter_class = type(
+            'CarouselFilter', (), {'__module__': 'gui.filters.carousel_filter'})
+        standard_provider = type('Provider', (), {
+            '_VehicleFiltersDataProvider__filter': standard_filter_class()})()
+        self.assertFalse(self.ns['_is_frontline_filter'](standard_provider))
+        self.ns['FILTER_PROVIDERS'] = [standard_provider]
+        self.assertFalse(self.ns['_is_hangar_context_active']())
 
     def test_native_update_recovers_without_polling_and_finalize_waits_again(self):
         class Presenter(object):
@@ -334,6 +366,49 @@ class InventoryLifecycleTests(unittest.TestCase):
             self.ns['CACHE_SYNC_REASON'].CLIENT_UPDATE, {8: {999}})
         self.callbacks.pop(0)()
         self.assertEqual(self.ns['ALPHA_DAMAGE_CACHE'], {(123, 11): 240})
+
+    def test_native_settings_only_empty_diff_preserves_925_alpha_entries(self):
+        class Items(object):
+            def invalidateCache(self, diff=None):
+                return {}
+        items = Items()
+        self.ns['SERVICES'].itemsCache.items = items
+        self.ns['_patch_items_invalidation'](items)
+        self.ns['_patch_items_invalidation'](items)
+        cache = self.ns['ALPHA_DAMAGE_CACHE']
+        cache.update(((i, 11), 240) for i in range(1, 926))
+        self.ns['_refresh_all_models'] = lambda *args, **kwargs: None
+        for settings in ({74: 68}, {74: 4}, {73: 1073741824}, {73: 0}):
+            result = items.invalidateCache({'intUserSettings': settings})
+            self.ns['_on_items_cache_sync_completed'](2, result)
+            self.callbacks.pop(0)()
+            self.assertEqual(len(cache), 925)
+        result = items.invalidateCache()
+        self.ns['_on_items_cache_sync_completed'](2, result)
+        self.callbacks.pop(0)()
+        self.assertEqual(cache, {})
+
+    def test_invalidation_hook_preserves_return_identity_and_exception(self):
+        result = {1: {123}}
+        class Items(object):
+            def invalidateCache(self, diff=None):
+                if diff == 'fail':
+                    raise ValueError('native failure')
+                return result
+        items = Items()
+        self.ns['SERVICES'].itemsCache.items = items
+        self.ns['_patch_items_invalidation'](items)
+        self.assertIs(items.invalidateCache({'inventory': {}}), result)
+        self.assertIs(self.ns['ITEMS_INVALIDATION_CONTEXT']['result'], result)
+        with self.assertRaises(ValueError):
+            items.invalidateCache('fail')
+        # Equal but distinct empty maps cannot inherit partial provenance.
+        self.ns['ITEMS_INVALIDATION_CONTEXT'].update(result={}, full=False)
+        self.ns['ALPHA_DAMAGE_CACHE'][(123, 11)] = 240
+        self.ns['_refresh_all_models'] = lambda *args, **kwargs: None
+        self.ns['_on_items_cache_sync_completed'](2, {})
+        self.callbacks.pop(0)()
+        self.assertEqual(self.ns['ALPHA_DAMAGE_CACHE'], {})
 
     def test_client_sync_refreshes_displayed_values_without_setup_change(self):
         vehicle = type('Vehicle', (), {'intCD': 123, 'setup': (11, 21), 'alpha': 240})()

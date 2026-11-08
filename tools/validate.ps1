@@ -29,6 +29,7 @@ try {
     else {
         throw 'Comp7 hangar bundle is missing from the package.'
     }
+    $frontlineBundlePath = 'res/frontline/gui/gameface/_dist/production/mono/lobby/hangar/bundle.js'
     $tooltipBundlePath = if ($names -contains 'res/gui/gameface/_dist/production/mono/hangar/vehicle_tooltip/bundle.js') {
         'res/gui/gameface/_dist/production/mono/hangar/vehicle_tooltip/bundle.js'
     }
@@ -47,6 +48,7 @@ try {
         'res/gui/gameface/mods/hcc/hangar_carousel_classic/hangar_carousel_classic.tooltip.css',
         $nativeBundlePath,
         $comp7BundlePath,
+        $frontlineBundlePath,
         $tooltipBundlePath,
         'res/gui/gameface/_dist/production/mono/hangar/vehicle_tooltip/vehicle_tooltip.css'
     )
@@ -196,6 +198,38 @@ try {
     }
     if (-not $comp7Source.Contains('3===s&&"hcc-native-carousel-page--3",4===s&&"hcc-native-carousel-page--4"')) {
         throw 'Comp7 carousel page does not expose three- and four-row layout classes.'
+    }
+    $frontlineBundle = $zip.GetEntry($frontlineBundlePath)
+    $frontlineStream = $frontlineBundle.Open()
+    $frontlineReader = New-Object IO.StreamReader($frontlineStream, [Text.Encoding]::UTF8)
+    try {
+        $frontlineSource = $frontlineReader.ReadToEnd()
+    }
+    finally {
+        $frontlineReader.Dispose()
+        $frontlineStream.Dispose()
+    }
+    if (-not $frontlineSource.Contains('for(let a=0;a<e.length;a+=h)t.push(e.slice(a,a+h))') -or
+        -not $frontlineSource.Contains('const n=t.at(-1);if(n)for(;n.length<h;)n.push(q_)')) {
+        throw 'Frontline carousel bundle does not chunk vehicles according to the configured row count.'
+    }
+    if (-not $frontlineSource.Contains('totalElements:1<h?x.length:b.length') -or
+        -not $frontlineSource.Contains('return 1<h?(0,nr.jsx)(ge,')) {
+        throw 'Frontline carousel bundle does not render three- and four-row carousels.'
+    }
+    if (-not $frontlineSource.Contains('className:Sa(CR,2===s&&jR,3===s&&"hcc-native-carousel-page--3",4===s&&"hcc-native-carousel-page--4")')) {
+        throw 'Frontline carousel page does not apply the three- and four-row heights to its layout container.'
+    }
+    if (-not $frontlineSource.Contains('hccSortJson:r.hccSortJson') -or
+        -not $frontlineSource.Contains('hcc.filtered||allowed.has(String(e.id))') -or
+        -not $frontlineSource.Contains('hcc.filtered||allowed.has(String(a.id))') -or
+        -not $frontlineSource.Contains('values[String(e.id)]')) {
+        throw 'Frontline carousel does not apply HCC filtering and sorting to its vehicle list.'
+    }
+    if (-not $frontlineSource.Contains('JSON.parse(e.requires.filters.model.hccSortJson.get()') -or
+        -not $frontlineSource.Contains('hcc.filtered&&i.splice(0,i.length,...i.filter(e=>hccAllowed.has(String(e.id))||hccAllowed.has(String(e.inventoryId))))') -or
+        -not $frontlineSource.Contains('return 0}),ls(()=>a.set(i))')) {
+        throw 'Frontline rendered carousel list does not apply HCC filtering and sorting, including playlists.'
     }
     $tooltipBundle = $zip.GetEntry($tooltipBundlePath)
     $tooltipStream = $tooltipBundle.Open()

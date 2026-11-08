@@ -83,12 +83,27 @@ $comp7Entry = Resolve-NativeEntryPath `
     -PackageName 'comp7.pkg' `
     -CurrentEntry 'comp7/gui/gameface/_dist/production/mono/lobby/hangar/bundle.js' `
     -LegacyEntry 'comp7/gui/gameface/_dist/production/mono/lobby/views/hangar/hangar.html/bundle.js'
+$frontlineEntry = 'frontline/gui/gameface/_dist/production/mono/lobby/hangar/bundle.js'
+$frontlinePackagePath = Join-Path $GameRoot 'res\packages\frontline.pkg'
+if (-not (Test-Path -LiteralPath $frontlinePackagePath)) {
+    throw "Frontline package not found: $frontlinePackagePath"
+}
+$frontlineZip = [IO.Compression.ZipFile]::OpenRead($frontlinePackagePath)
+try {
+    if (-not $frontlineZip.GetEntry($frontlineEntry)) {
+        throw "Frontline hangar bundle not found in $frontlinePackagePath."
+    }
+}
+finally {
+    $frontlineZip.Dispose()
+}
 $tooltipEntry = Resolve-NativeEntryPath `
     -PackageName 'gui-part1.pkg' `
     -CurrentEntry 'gui/gameface/_dist/production/mono/hangar/vehicle_tooltip/bundle.js' `
     -LegacyEntry 'gui/gameface/_dist/production/mono/hangar/views/vehicle_tooltip/vehicle_tooltip.html/bundle.js'
 $mainBundleOutput = Join-Path $stage ('res\' + $mainEntry.Replace('/', '\'))
 $comp7BundleOutput = Join-Path $stage ('res\' + $comp7Entry.Replace('/', '\'))
+$frontlineBundleOutput = Join-Path $stage ('res\' + $frontlineEntry.Replace('/', '\'))
 $tooltipBundleOutput = Join-Path $stage ('res\' + $tooltipEntry.Replace('/', '\'))
 
 if (-not $Python27) {
@@ -105,6 +120,7 @@ New-Item -ItemType Directory -Force -Path `
     (Join-Path $stage 'res\gui\gameface\mods\hcc\hangar_carousel_classic'), `
     (Split-Path -Parent $mainBundleOutput), `
     (Split-Path -Parent $comp7BundleOutput), `
+    (Split-Path -Parent $frontlineBundleOutput), `
     (Split-Path -Parent $tooltipBundleOutput), `
     (Join-Path $stage 'res\gui\gameface\_dist\production\mono\hangar\vehicle_tooltip'), `
     $dist | Out-Null
@@ -136,6 +152,9 @@ Copy-Item -LiteralPath (Join-Path $repo 'res\gui\gameface\mods\hcc\hangar_carous
 & (Join-Path $PSScriptRoot 'patch-native-comp7-carousel.ps1') `
     -GameRoot $GameRoot `
     -OutputPath $comp7BundleOutput
+& (Join-Path $PSScriptRoot 'patch-native-frontline-carousel.ps1') `
+    -GameRoot $GameRoot `
+    -OutputPath $frontlineBundleOutput
 & (Join-Path $PSScriptRoot 'patch-native-tooltip.ps1') `
     -GameRoot $GameRoot `
     -BundleOutputPath $tooltipBundleOutput `

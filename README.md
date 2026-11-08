@@ -4,8 +4,8 @@ Classic-style hangar carousel for World of Tanks 2.x with native Gameface integr
 
 ## Quick Facts
 
-- Version: 1.0.24
-- Latest release: [v1.0.24](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/tag/v1.0.24)
+- Current build: 1.0.25
+- Latest release: [v1.0.25](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/tag/v1.0.25)
 - Full release notes: [GitHub Releases](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases)
 - Mod ID: hangar.carousel.classic
 - Runtime: WoT embedded Python 2.7
@@ -16,6 +16,7 @@ Classic-style hangar carousel for World of Tanks 2.x with native Gameface integr
 ## Key Features
 
 - Carousel rows: manual 1-4 and auto mode.
+- Frontline (Epic Battles) hangar support through the shared native carousel components, including HCC filtering/sorting on Frontline's vehicle list and its separate three- and four-row layout patch.
 - Vehicle card stats: battles, win rate, average damage, alpha damage, mastery, marks on gun.
 - Vanilla filters include bonus, favorite, elite, premium, and rented/temporary vehicles. HCC provides more-credits, incomplete-field-modifications, non-elite, not-ready, marks-incomplete, and crew-not-fully-trained filters. Active filters are combined with AND logic and immediately applied to the carousel.
 - Filtering, sorting, and card statistics can be enabled independently. Individual filters and single-rule sorting are toggled in the HCC panel; multiple sorting rules are configured as a hierarchy in ModsSettingsAPI.
@@ -23,13 +24,14 @@ Classic-style hangar carousel for World of Tanks 2.x with native Gameface integr
 - Nation/type priority layers for deterministic grouping.
 - Version 1.0.23 restores native rented-filter behavior based on Aslain's hotfix and reduces repeated garage-stat work.
 - Version 1.0.24 removes the 256-dossier limit for correct marks filtering, badge counts, and card stats in large garages. Thanks to Aslain for the detailed follow-up in [issue #4](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/issues/4#issuecomment-6509364155). Dossier and alpha-damage caches remain enabled; initial-build latency is not claimed to be fixed.
-- Release packages: `dist/mod_hangar_carousel_classic_1.0.24.wotmod` and `dist/hangar_carousel_classic_1.0.24_full.zip`. The normal release includes the functional candidate fixes below without timing instrumentation. All 60 Python 2.7 regression tests pass, including large-garage checks with up to 925 simulated vehicles.
+- Final 1.0.25 packages: [standalone WOTMOD](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.25/mod_hangar_carousel_classic_1.0.25.wotmod) and [full ZIP](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.25/hangar_carousel_classic_1.0.25_full.zip). The normal package includes the functional alpha-test fixes without timing instrumentation, plus the Frontline carousel height and filtering fixes confirmed in game. All 71 Python 2.7 regression tests pass.
+- Frontline filter follow-up: HCC filters and sorting now also reach the actual rendered carousel inventory list, including active playlists. The previous playlist-selection-only patch did not change displayed vehicles. Run `node tools/test_frontline_filters.js`; the user confirmed Frontline filtering in game on 2026-11-08.
 
 ## Separate loading-time diagnostic build
 
-- Build with Python 2.7: `python tools/build_diagnostic.py`, after building the normal 1.0.24 package. This creates `dist/mod_hangar_carousel_classic_1.0.24-diagnostic.wotmod` without changing the base source or normal packages.
+- Build with Python 2.7: `python tools/build_diagnostic.py`, after building the normal 1.0.25 package. This creates a version-matched diagnostic WOTMOD without changing the base source or normal packages.
 - For testing, replace the existing Classic WOTMOD with the diagnostic WOTMOD; do not install both. Keep the existing GameFace dependency. Restore the normal WOTMOD after testing.
-- Restart the game, enter the garage, then turn card statistics off and back on in the mod settings to request a second complete stats build without restarting. Send the `HCC DIAG 1.0.24-diagnostic` lines from `game.log`, including the initial build.
+- Restart the game, enter the garage, then turn card statistics off and back on in the mod settings to request a second complete stats build without restarting. Send the matching `HCC DIAG` lines from `game.log`, including the initial build.
 - Each rebuilt payload produces one diagnostic summary: payload/statistics milliseconds, alpha-damage milliseconds, actual vehicle-dossier fetch milliseconds, dossier-value extraction milliseconds, alpha cache reuse/computations, and dossier cache hits/misses/fetches. Lightweight refreshes do not produce a summary. Failed measured builds are marked `complete=False`; existing exceptions still propagate.
 - Timings use Python 2.7's high-resolution Windows `time.clock()` elapsed-time counter. `payload_ms` includes filtering and other payload work; `stats_ms` includes its alpha/dossier/extraction components, so do not add these inclusive totals together. Extraction covers random-stats access, battles, win rate, average damage, and both marks helpers, not account-dossier setup or JSON/UI rendering. Dossier counters apply to this payload, not the whole game session; zero misses may mean the cache was already filled by another consumer.
 - This is measurement only, with small instrumentation overhead: no scheduling, cache, filtering, or statistical-value changes. Run the Python 2.7 regression suite with `python -m unittest discover -s tools -p "test*.py"`.
@@ -42,7 +44,7 @@ The separate `dist/mod_hangar_carousel_classic_1.0.24-lifecycle-test.wotmod` con
 
 ## Alpha-loading optimization (local instrumented candidate)
 
-- Build with Python 2.7: `python tools/build_diagnostic.py --candidate`. The separate output is `dist/mod_hangar_carousel_classic_1.0.24-alpha-test7.wotmod`. This explicit candidate mode packages current Python source with native resources from the existing 1.0.24 base archive, excluding the obsolete standalone HCC layout registration; it does not overwrite earlier normal, diagnostic, lifecycle-test, or alpha-test packages.
+- Build with Python 2.7: `python tools/build_diagnostic.py --candidate`. This creates a version-matched alpha diagnostic package using current Python source and HCC card-overlay JS with native resources from the matching normal package; it does not overwrite the normal package.
 - Includes the dossier-limit removal, native-inventory startup fix, and the same `HCC DIAG` timing fields as the original diagnostic build. Replace any other Classic WOTMOD for testing; keep GameFace installed.
 - Alpha lookup now reads `VehicleParams(vehicle).avgDamage` directly. The old code rejected the client's lazy `ParamsDictProxy` because it was not a `dict`, then unnecessarily built a similar-crew comparator with extra vehicle/crew/bonus work. The native alpha property retains the client's selected-shot, damage-distribution/KPI, and rounding logic without a handwritten base-shell substitution. The existing setup cache and lazy candidate lookups remain.
 - The final descriptor fallback uses the shell's `armorDamage`, as the client does, rather than `damage`. Normal operation uses the native property, not this fallback.
@@ -56,13 +58,18 @@ The separate `dist/mod_hangar_carousel_classic_1.0.24-lifecycle-test.wotmod` con
 - Alpha-test6 adds a cross-session cache in `alpha_cache.json` beside the preferences-based HCC config. Its key contains the exact inputs used by native `VehicleParams.avgDamage`: vehicle/shell compact descriptors, shell base damage/randomization, and the native lower/upper damage-distribution KPI factors. Computing `getKpiFactors(vehicle)` validates crew, equipment and field-modification effects without the unrelated `getVehicleFactors` initialization. No account identifiers are stored: identical complete alpha inputs produce the same value across accounts.
 - First use computes native alpha and saves successful primary-vehicle results. Subsequent sessions reuse entries only after validating those inputs. New vehicles or changed alpha inputs are computed normally; an equipment change that does not affect alpha can safely reuse the stored value. Session caches and selective invalidation remain. Fallback results are not persisted under the primary vehicle's key. Client-version/schema changes discard saved entries; invalid files log an error and rebuild. Writes are batched on a tracked callback; pending data is flushed at `fini()`.
 - Alpha-test7 fixes alpha-test6's import failure: WoT lacks `_ctypes`, so persistence now uses standard-library temporary files and backup/rename instead of `ctypes`. Failed replacement restores the old file; a startup interrupted between renames recovers the backup. This is recoverable replacement, not a single atomic Windows replace.
-- The 2026-11-05 client compatibility refresh accepts the updated main and Comp7 bundle hashes and builds normal 1.0.24 from those current client resources, retaining the candidate's functional fixes without timing instrumentation. All 16 main and 8 Comp7 patch anchors remain unique; tooltip JS/CSS are unchanged. The runtime stylesheet resource group is also corrected to a singleton tuple so compatibility verification reaches the stylesheet. In-game startup verification remains pending; accepting hashes alone does not establish that the garage hang is resolved.
-- Test twice with alpha-test7: first start fills the cache, second start should show `alpha_persistent_reused` for unchanged vehicles and `alpha_computed=0`. `alpha_fingerprint_ms` measures validation and is included in `alpha_ms`, not added to it. Check displayed alpha values and test one new vehicle or an alpha-relevant loadout/crew change. The first start adds validation work; the real benefit on subsequent starts must be measured, not inferred from mock tests. No release or live installation is performed by this command.
+- The 2026-11-05 client compatibility refresh accepts the updated main and Comp7 bundle hashes and builds from those current client resources, retaining functional fixes without timing instrumentation. All 16 main and 8 Comp7 patch anchors remain unique; tooltip JS/CSS are unchanged. The runtime stylesheet resource group is also corrected to a singleton tuple so compatibility verification reaches the stylesheet.
+- Alpha-test8 distinguishes full cache resets from settings-only empty invalid-item mappings by observing the native `ItemsRequester.invalidateCache(diff)` result identity and whether `diff is None`. It preserves the native return value and exceptions. Known partial settings-only updates retain in-memory alpha entries; genuine full resets and unknown empty mappings remain conservative. This removes the unnecessary fleet-wide fingerprint pass seen on four `intUserSettings` updates in Aslain's 925-vehicle test.
+- Alpha-test9 adopts one persistent record per vehicle compact descriptor: `entries["vehicleID"] = {"fingerprint": "...", "alpha": value}` (cache schema 2). Changed alpha inputs replace that vehicle's record rather than retaining alternate configurations. Returning to an older setup requires recalculation if its inputs differ from the saved record. In-memory alpha entries also discard older setups of the same vehicle, so switching back cannot leave persistence on the wrong setup. The safety ceiling remains 4096 vehicle records, not 4096 configurations per vehicle.
+- Schema-1 caches are migrated without blindly assigning old hashes to vehicles: after computing the unchanged live fingerprint, a matching legacy value is transferred to the identified vehicle record. Only validated records are written to schema 2; unmatched historical hashes are not persisted. A missing/mismatching value is calculated normally. The 927-entry/925-vehicle migration regression yields exactly 925 identified records without native recalculations.
+- The goal is responsive mod use overall: startup, filtering, statistics rebuilds, and crew/equipment changes. Persistence complements session caching and targeted invalidation; it is not only a next-start optimization. This format change does not reduce the cost of necessary KPI validation or resolve the unconfirmed overlay issue.
+- Off/on overlay rendering passes a DOM regression using the actual HCC JavaScript for the same cards, changed card sets, minimum-battle exclusion, and recycled cards. Aslain's reported in-game disappearance is not yet reproduced or claimed fixed. Counters now include `enabled`, `minimumBattles`, `belowMinimum`, and `overlay_ids` to distinguish eligible-card changes from missing DOM overlays. The existing `visible` counter counts created overlays, not proven on-screen visibility. Run `node tools/test_card_stats.js`.
+- The alpha-test9 behavior is included in the 1.0.25 release build without timing instrumentation.
 
 ## How to Install (using .wotmod only)
 
 - See the complete [installation guide](docs/INSTALLATION.md).
-- First, download the [v1.0.24 release](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/tag/v1.0.24).
+- First, download the [v1.0.25 release](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/tag/v1.0.25).
 - Copy the `.wotmod` file into your World of Tanks client's mods directory. 
 For instance, you might place it in a path like `G:/Games/World_of_Tanks_EU/mods/2.4.1.1/`.
 - The standalone WOTMOD requires `net.openwg.gameface_1.2.2.wotmod` or newer in the same client mods folder. The full package already includes GameFace 1.2.2.
@@ -73,28 +80,28 @@ For instance, you might place it in a path like `G:/Games/World_of_Tanks_EU/mods
 
 ## Full Package Installation
 
-- If you choose the complete package, [hangar_carousel_classic_1.0.24_full.zip](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.24/hangar_carousel_classic_1.0.24_full.zip) includes the carousel mod and GameFace 1.2.2 in `mods/2.4.1.1/`. Extract it directly into the World of Tanks installation directory. Aslain's Mod Menu and ModsSettingsBridge are intentionally omitted; get or update them separately via [Aslain's WoT ModPack](https://aslain.com/index.php?/topic/13-download-%E2%98%85-world-of-tanks-%E2%98%85-modpack/) if needed.
+- If you choose the complete package, [hangar_carousel_classic_1.0.25_full.zip](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.25/hangar_carousel_classic_1.0.25_full.zip) includes the carousel mod and GameFace 1.2.2 in `mods/2.4.1.1/`. Extract it directly into the World of Tanks installation directory. Aslain's Mod Menu and ModsSettingsBridge are intentionally omitted; get or update them separately via [Aslain's WoT ModPack](https://aslain.com/index.php?/topic/13-download-%E2%98%85-world-of-tanks-%E2%98%85-modpack/) if needed.
 
 ## Build Locally
 
 ```powershell
 ./tools/build.ps1
-./tools/validate.ps1 -PackagePath ./dist/mod_hangar_carousel_classic_1.0.24.wotmod
-./tools/install.ps1 -GameRoot G:/Games/World_of_Tanks_EU -PackagePath ./dist/mod_hangar_carousel_classic_1.0.24.wotmod
+./tools/validate.ps1 -PackagePath ./dist/mod_hangar_carousel_classic_1.0.25.wotmod
+./tools/install.ps1 -GameRoot G:/Games/World_of_Tanks_EU -PackagePath ./dist/mod_hangar_carousel_classic_1.0.25.wotmod
 ```
 
 ## Documentation
 
 - Detailed feature/config/build docs: [docs/TECHNICAL_DETAILS.md](docs/TECHNICAL_DETAILS.md)
-- Current release details: [docs/RELEASE_NOTES_1.0.24.md](docs/RELEASE_NOTES_1.0.24.md)
+- Current build details: [docs/RELEASE_NOTES_1.0.25.md](docs/RELEASE_NOTES_1.0.25.md)
 - Security summary: [EXECUTIVE_SUMMARY.md](EXECUTIVE_SUMMARY.md)
 - Security audit: [SECURITY_AUDIT_REPORT.md](SECURITY_AUDIT_REPORT.md)
 
 ## Quick Links
 
 - Releases overview: [GitHub Releases](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases)
-- Latest package (v1.0.24): [mod_hangar_carousel_classic_1.0.24.wotmod](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.24/mod_hangar_carousel_classic_1.0.24.wotmod)
-- Full package (v1.0.24): [hangar_carousel_classic_1.0.24_full.zip](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.24/hangar_carousel_classic_1.0.24_full.zip)
+- Current package (v1.0.25): [mod_hangar_carousel_classic_1.0.25.wotmod](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.25/mod_hangar_carousel_classic_1.0.25.wotmod)
+- Current full package (v1.0.25): [hangar_carousel_classic_1.0.25_full.zip](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.25/hangar_carousel_classic_1.0.25_full.zip)
 - Full technical docs: [docs/TECHNICAL_DETAILS.md](docs/TECHNICAL_DETAILS.md)
 - Main mod source: [res/scripts/client/gui/mods/mod_hangar_carousel_classic.py](res/scripts/client/gui/mods/mod_hangar_carousel_classic.py)
 - Frontend assets: [res/gui/gameface/mods/hcc/hangar_carousel_classic](res/gui/gameface/mods/hcc/hangar_carousel_classic)

@@ -1,5 +1,6 @@
 """Exercise persistent alpha reuse across sessions with actual mod functions."""
 from __future__ import absolute_import, division
+from collections import OrderedDict
 
 import ast
 import hashlib
@@ -29,7 +30,8 @@ class PersistentAlphaTests(unittest.TestCase):
             tree = ast.parse(stream.read(), source)
         names = ('_load_persistent_alpha_cache', '_save_persistent_alpha_cache',
                  '_persistent_alpha_key', '_remember_persistent_alpha',
-                 '_alpha_cache_key', '_alpha_damage', '_on_items_cache_sync_completed')
+                 '_alpha_cache_key', '_alpha_damage', '_on_items_cache_sync_completed',
+                 '_patch_items_invalidation')
         nodes = [node for node in tree.body
                  if isinstance(node, ast.FunctionDef) and node.name in names]
         self.assertEqual(len(nodes), len(names))
@@ -42,6 +44,8 @@ class PersistentAlphaTests(unittest.TestCase):
 
         self.ns = dict(
             os=os, io=io, json=json, tempfile=tempfile, hashlib=hashlib, time=time,
+            OrderedDict=OrderedDict, PERSISTENT_ALPHA_MAX_ENTRIES=4096,
+            ITEMS_INVALIDATION_CONTEXT={'result': None, 'full': True},
             PERSISTENT_ALPHA_PATH=self.path, VehicleParams=NativeParams,
             getClientVersion=lambda: self.version,
             getKpiFactors=lambda vehicle: Object(getFactor=lambda name: vehicle.kpi.get(name, 0)),
@@ -63,8 +67,8 @@ class PersistentAlphaTests(unittest.TestCase):
         self.ns['ALPHA_DAMAGE_CACHE'] = {}
         self.ns['ALPHA_DAMAGE_STATS'] = {'hits': 0, 'computed': 0}
         self.ns['PERSISTENT_ALPHA_STATE'] = dict(
-            loaded=False, version=None, entries={}, dirty=False,
-            scheduled=False, disabled=False)
+            loaded=False, version=None, entries=OrderedDict(), dirty=False,
+            legacy={}, scheduled=False, disabled=False)
         self.callbacks[:] = []
 
     def vehicle(self, cd, alpha=240):
@@ -99,6 +103,32 @@ class PersistentAlphaTests(unittest.TestCase):
         self.assertEqual(self.ns['_alpha_damage'](self.vehicle(926)), 240)
         self.assertEqual(len(self.calls), 926)
 
+    def test_persistent_entries_are_bounded_across_saves_and_sessions(self):
+        self.ns['_load_persistent_alpha_cache']()
+        for i in range(4200):
+            self.ns['_remember_persistent_alpha']((str(i + 1), '%064x' % i), 240)
+        entries = self.ns['PERSISTENT_ALPHA_STATE']['entries']
+        self.assertEqual(len(entries), 4096)
+        self.assertNotIn('1', entries)
+        self.assertIn('4200', entries)
+        self.save()
+        self.new_session()
+        self.ns['_load_persistent_alpha_cache']()
+        self.assertEqual(len(self.ns['PERSISTENT_ALPHA_STATE']['entries']), 4096)
+        self.ns['_remember_persistent_alpha'](('5001', '%064x' % 5000), 250)
+        self.assertEqual(len(self.ns['PERSISTENT_ALPHA_STATE']['entries']), 4096)
+        self.save()
+
+    def test_oversized_vehicle_cache_is_pruned(self):
+        entries = OrderedDict((str(i + 1), {'fingerprint': '%064x' % i, 'alpha': 240})
+                              for i in range(4200))
+        with open(self.path, 'w') as stream:
+            json.dump({'schema': 2, 'clientVersion': self.version, 'entries': entries}, stream)
+        self.ns['_load_persistent_alpha_cache']()
+        self.assertEqual(len(self.ns['PERSISTENT_ALPHA_STATE']['entries']), 4096)
+        self.assertTrue(self.ns['PERSISTENT_ALPHA_STATE']['dirty'])
+        self.save()
+
     def test_changed_damage_inputs_are_not_reused_between_sessions(self):
         for change in ('base', 'randomization', 'lower', 'upper', 'shell'):
             self.new_session()
@@ -122,6 +152,106 @@ class PersistentAlphaTests(unittest.TestCase):
             self.assertEqual(self.ns['_alpha_damage'](vehicle), 250)
             self.assertEqual(len(self.calls), before + 1)
 
+    def test_repeated_changes_replace_one_identifiable_vehicle_record(self):
+        vehicle = self.vehicle(1)
+        other = self.vehicle(2)
+        self.ns['_alpha_damage'](other)
+        for index in range(20):
+            vehicle.kpi['damageAndPiercingDistributionUpperBound'] = index
+            vehicle.alpha = 240 + index
+            self.ns['_on_items_cache_sync_completed'](2, {1: {1}})
+            self.callbacks[-1]()
+            self.assertEqual(self.ns['_alpha_damage'](vehicle), 240 + index)
+            entries = self.ns['PERSISTENT_ALPHA_STATE']['entries']
+            self.assertEqual(set(entries), {'1', '2'})
+            self.assertEqual(entries['1']['alpha'], 240 + index)
+            self.assertEqual(entries['1']['fingerprint'], self.ns['_persistent_alpha_key'](vehicle)[1])
+            self.assertEqual(entries['2']['alpha'], 240)
+        self.save()
+        with open(self.path, 'r') as stream:
+            saved = json.load(stream)
+        self.assertEqual(saved['schema'], 2)
+        self.assertEqual(len(saved['entries']), 2)
+        self.new_session()
+        before = len(self.calls)
+        self.assertEqual(self.ns['_alpha_damage'](vehicle), 259)
+        self.assertEqual(len(self.calls), before)
+        vehicle.kpi['damageAndPiercingDistributionUpperBound'] = 0
+        vehicle.alpha = 240
+        self.ns['_on_items_cache_sync_completed'](2, {1: {1}})
+        self.callbacks[-1]()
+        self.assertEqual(self.ns['_alpha_damage'](vehicle), 240)
+        self.assertEqual(len(self.calls), before + 1)
+        self.assertEqual(len(self.ns['PERSISTENT_ALPHA_STATE']['entries']), 2)
+
+    def test_gun_switch_back_replaces_persistent_record_in_same_session(self):
+        vehicle = self.vehicle(1)
+        self.ns['_alpha_damage'](vehicle)
+        vehicle.descriptor.gun.compactDescr = 12
+        vehicle.descriptor.shot.shell.armorDamage = (320, 0)
+        vehicle.alpha = 320
+        self.ns['_alpha_damage'](vehicle)
+        vehicle.descriptor.gun.compactDescr = 11
+        vehicle.descriptor.shot.shell.armorDamage = (240, 0)
+        vehicle.alpha = 240
+        self.assertEqual(self.ns['_alpha_damage'](vehicle), 240)
+        self.assertEqual(self.calls, [1, 1, 1])
+        self.assertEqual(len(self.ns['ALPHA_DAMAGE_CACHE']), 1)
+        self.assertEqual(self.ns['PERSISTENT_ALPHA_STATE']['entries']['1']['alpha'], 240)
+
+    def test_legacy_hashes_migrate_only_after_matching_live_vehicle_inputs(self):
+        vehicle = self.vehicle(1)
+        key = self.ns['_persistent_alpha_key'](vehicle)
+        legacy = {key[1]: 240, 'f' * 64: 999}
+        with open(self.path, 'w') as stream:
+            json.dump({'schema': 1, 'clientVersion': self.version, 'entries': legacy}, stream)
+        self.new_session()
+        self.assertEqual(self.ns['_alpha_damage'](vehicle), 240)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.ns['PERSISTENT_ALPHA_STATE']['entries'],
+                         {'1': {'fingerprint': key[1], 'alpha': 240}})
+        self.save()
+        with open(self.path, 'r') as stream:
+            saved = json.load(stream)
+        self.assertEqual(saved['schema'], 2)
+        self.assertEqual(set(saved['entries']), {'1'})
+        self.new_session()
+        self.assertEqual(self.ns['_alpha_damage'](vehicle), 240)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.ns['_alpha_damage'](self.vehicle(2)), 240)
+        self.assertEqual(self.calls, [2])
+
+    def test_invalid_vehicle_record_ids_and_fingerprints_are_rejected(self):
+        for key, record in (('01', {'fingerprint': '0' * 64, 'alpha': 240}),
+                            ('0', {'fingerprint': '0' * 64, 'alpha': 240}),
+                            ('1', {'fingerprint': 'invalid', 'alpha': 240}),
+                            ('1', 240)):
+            with open(self.path, 'w') as stream:
+                json.dump({'schema': 2, 'clientVersion': self.version,
+                           'entries': {key: record}}, stream)
+            self.new_session()
+            before = len(self.errors)
+            self.ns['_alpha_damage'](self.vehicle(1))
+            self.assertEqual(len(self.errors), before + 1)
+
+    def test_927_legacy_configs_become_925_identifiable_vehicle_records(self):
+        vehicles = [self.vehicle(i) for i in range(1, 926)]
+        legacy = dict((self.ns['_persistent_alpha_key'](vehicle)[1], 240)
+                      for vehicle in vehicles)
+        legacy.update({'a' * 64: 250, 'b' * 64: 260})
+        with open(self.path, 'w') as stream:
+            json.dump({'schema': 1, 'clientVersion': self.version, 'entries': legacy}, stream)
+        self.new_session()
+        for vehicle in vehicles:
+            self.assertEqual(self.ns['_alpha_damage'](vehicle), 240)
+        self.assertEqual(self.calls, [])
+        self.save()
+        with open(self.path, 'r') as stream:
+            saved = json.load(stream)
+        self.assertEqual(saved['schema'], 2)
+        self.assertEqual(set(saved['entries']), set(str(i) for i in range(1, 926)))
+        self.assertEqual(len(saved['entries']), 925)
+
     def test_partial_sync_revalidates_changed_kpi_and_preserves_other_vehicle(self):
         changed, other = self.vehicle(1), self.vehicle(2)
         self.ns['_alpha_damage'](changed)
@@ -142,6 +272,29 @@ class PersistentAlphaTests(unittest.TestCase):
         self.assertEqual(self.ns['_alpha_damage'](vehicle), 240)
         self.assertEqual(self.calls, [1])
         self.assertEqual(self.ns['ALPHA_DAMAGE_STATS']['persistent'], 1)
+
+    def test_four_account_settings_updates_do_not_run_fingerprints_for_925_vehicles(self):
+        vehicles = [self.vehicle(i) for i in range(1, 926)]
+        for vehicle in vehicles:
+            self.ns['_alpha_damage'](vehicle)
+        class Items(object):
+            def invalidateCache(self, diff=None):
+                return {}
+        items = Items()
+        self.ns['SERVICES'] = Object(itemsCache=Object(items=items))
+        self.ns['_patch_items_invalidation'](items)
+        def unexpected(vehicle):
+            raise AssertionError('Settings-only update must not run a fingerprint')
+        self.ns['_persistent_alpha_key'] = unexpected
+        for settings in ({74: 68}, {74: 4}, {73: 1073741824}, {73: 0}):
+            result = items.invalidateCache({'intUserSettings': settings})
+            self.ns['_on_items_cache_sync_completed'](2, result)
+            self.callbacks[-1]()
+            for vehicle in vehicles:
+                self.assertEqual(self.ns['_alpha_damage'](vehicle), 240)
+        self.assertEqual(len(self.calls), 925)
+        self.assertEqual(self.ns['ALPHA_DAMAGE_STATS']['computed'], 925)
+        self.assertEqual(self.ns['ALPHA_DAMAGE_STATS']['hits'], 3700)
 
     def test_client_update_and_schema_update_discard_saved_entries(self):
         self.ns['_alpha_damage'](self.vehicle(1))
@@ -174,8 +327,8 @@ class PersistentAlphaTests(unittest.TestCase):
 
     def test_invalid_entry_is_rejected_not_used_as_alpha(self):
         with open(self.path, 'w') as stream:
-            json.dump({'schema': 1, 'clientVersion': self.version,
-                       'entries': {'0' * 64: True}}, stream)
+            json.dump({'schema': 2, 'clientVersion': self.version,
+                       'entries': {'1': {'fingerprint': '0' * 64, 'alpha': True}}}, stream)
         self.ns['_alpha_damage'](self.vehicle(1))
         self.assertEqual(len(self.errors), 1)
         self.assertEqual(self.calls, [1])
@@ -244,7 +397,9 @@ class PersistentAlphaTests(unittest.TestCase):
 
     def test_native_input_validation_has_no_vehicleparams_call(self):
         vehicle = self.vehicle(1)
-        self.assertEqual(len(self.ns['_persistent_alpha_key'](vehicle)), 64)
+        key = self.ns['_persistent_alpha_key'](vehicle)
+        self.assertEqual(key[0], '1')
+        self.assertEqual(len(key[1]), 64)
         self.assertEqual(self.calls, [])
 
     def test_second_start_diagnostic_counts_persistent_reuse_and_validation_time(self):

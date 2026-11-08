@@ -76,6 +76,17 @@ def instrument(source, helpers, filename, version=None):
     return compile(ast.fix_missing_locations(tree), filename, 'exec', dont_inherit=True)
 
 
+def source_version(source, filename):
+    tree = ast.parse(source, filename)
+    versions = [node.value.s for node in tree.body if isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Name) and target.id == 'MOD_VERSION'
+                        for target in node.targets)
+                and isinstance(node.value, ast.Str)]
+    if len(versions) != 1:
+        raise ValueError('Expected exactly one string MOD_VERSION assignment.')
+    return versions[0]
+
+
 def main():
     if sys.version_info[:2] != (2, 7):
         raise RuntimeError('Build this diagnostic package with Python 2.7.')
@@ -91,8 +102,8 @@ def main():
         source = stream.read()
     with open(os.path.join(root, 'tools', 'carousel_diagnostics.py'), 'rb') as stream:
         helpers = stream.read()
-    version = '1.0.24'
-    diagnostic_version = version + ('-alpha-test7' if options.candidate else '-diagnostic')
+    version = source_version(source, source_path)
+    diagnostic_version = version + ('-alpha-test9' if options.candidate else '-diagnostic')
     code = instrument(source, helpers, source_path, diagnostic_version)
     base = os.path.join(root, 'dist', 'mod_hangar_carousel_classic_%s.wotmod' % version)
     output = os.path.join(root, 'dist', 'mod_hangar_carousel_classic_%s.wotmod' %
@@ -113,6 +124,10 @@ def main():
                 data = original.read(info.filename)
                 if info.filename == entry:
                     data = bytecode
+                elif (options.candidate and info.filename ==
+                      'res/gui/gameface/mods/hcc/hangar_carousel_classic/hangar_carousel_classic.js'):
+                    with open(os.path.join(root, *info.filename.split('/')), 'rb') as stream:
+                        data = stream.read()
                 elif info.filename == 'meta.xml':
                     if data.count('<version>%s</version>' % version) != 1:
                         raise ValueError('Base package version does not match the test version.')

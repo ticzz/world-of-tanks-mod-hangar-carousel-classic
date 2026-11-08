@@ -267,6 +267,8 @@ function renderCardStats() {
   const cards = Array.from(document.querySelectorAll(`[data-test-id^="${CARD_PREFIX}"]`));
   let matched = 0;
   let visible = 0;
+  let belowMinimum = 0;
+  const overlayIds = [];
   let sampleText = "";
   cards.forEach((card) => {
     const id = card.getAttribute("data-test-id").slice(CARD_PREFIX.length);
@@ -278,6 +280,7 @@ function renderCardStats() {
     host.classList.add("hcc-card-stats-host");
     let overlay = directChildByClass(host, "hcc-card-stats");
     if (stats) matched += 1;
+    if (stats && Number(stats.battles) < minimumBattles) belowMinimum += 1;
     card.removeAttribute("data-hcc-stats");
     if (!stats || Number(stats.battles) < minimumBattles || state.statsConfig?.enabled === false) {
       if (overlay) overlay.remove();
@@ -310,12 +313,16 @@ function renderCardStats() {
     }
     if (!sampleText) sampleText = `${id}=${overlay.textContent}`;
     visible += 1;
+    overlayIds.push(id);
   });
 
   const diagnostic = `${cards.length}/${matched}/${visible}/${Object.keys(state.stats || {}).length}`;
-  if (diagnostic !== lastStatsDiagnostic) {
-    lastStatsDiagnostic = diagnostic;
-    console.warn(`[mod_hangar_carousel_classic] cards/matched/visible/stats: ${diagnostic}; sample: ${sampleText}`);
+  const details = `enabled=${state.statsConfig?.enabled !== false} minimumBattles=${minimumBattles} ` +
+    `belowMinimum=${belowMinimum} overlay_ids=${overlayIds.join(",")}`;
+  const diagnosticSignature = `${diagnostic}; ${details}`;
+  if (diagnosticSignature !== lastStatsDiagnostic) {
+    lastStatsDiagnostic = diagnosticSignature;
+    console.warn(`[mod_hangar_carousel_classic] cards/matched/visible/stats: ${diagnostic}; ${details}; sample: ${sampleText}`);
   }
 }
 

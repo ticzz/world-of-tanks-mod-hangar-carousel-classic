@@ -41,6 +41,7 @@ class AlphaDamageTests(unittest.TestCase):
             ALPHA_DAMAGE_CACHE={}, ALPHA_DAMAGE_STATS={'hits': 0, 'computed': 0},
             _persistent_alpha_key=lambda vehicle: None,
             _remember_persistent_alpha=lambda key, value: None,
+            ITEMS_INVALIDATION_CONTEXT={'result': None, 'full': True},
             LOGGER=logging.getLogger('alpha-tests'))
         source = os.path.join(root, 'res', 'scripts', 'client', 'gui', 'mods',
                               'mod_hangar_carousel_classic.py')

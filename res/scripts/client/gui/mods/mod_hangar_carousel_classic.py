@@ -5,6 +5,7 @@ syntax. Custom filter predicates narrow the native vehicle-statistics model;
 the Gameface layer supplies independent toggles and card overlays.
 """
 from __future__ import absolute_import, division
+from collections import OrderedDict
 import hashlib
 import io
 import json
@@ -49,7 +50,7 @@ try:
 except Exception:
     carousel_filter_module = None
 MOD_ID = 'mod_hangar_carousel_classic'
-MOD_VERSION = '1.0.24'
+MOD_VERSION = '1.0.25'
 MOD_LINKAGE_ID = 'mod_hangar.carousel.classic'
 PLAYLIST_ID_PREFIX = 'mhcc_'
 PREFERENCES_DIR = getPreferencesDirPath()
@@ -407,8 +408,10 @@ ALPHA_DAMAGE_CACHE = {}
 ALPHA_DAMAGE_STATS = {'hits': 0, 'computed': 0}
 PERSISTENT_ALPHA_PATH = os.path.join(PREFERENCES_DIR, 'mods', 'mod_hangar_carousel_classic',
                                     'alpha_cache.json')
-PERSISTENT_ALPHA_STATE = {'loaded': False, 'version': None, 'entries': {},
-                          'dirty': False, 'scheduled': False, 'disabled': False}
+PERSISTENT_ALPHA_MAX_ENTRIES = 4096
+PERSISTENT_ALPHA_STATE = {'loaded': False, 'version': None, 'entries': OrderedDict(),
+                          'legacy': {}, 'dirty': False, 'scheduled': False, 'disabled': False}
+ITEMS_INVALIDATION_CONTEXT = {'result': None, 'full': True}
 DOSSIER_CACHE_GENERATION = 0
 COMPATIBILITY_WARNING_SHOWN = False
 ITEMS_CACHE_SYNC_BOUND = False
@@ -552,6 +555,25 @@ def _unbind_dossiers_resync():
         DOSSIER_RESYNC_BOUND = False
 
 
+def _patch_items_invalidation(items):
+    target = type(items)
+    if getattr(target, '_hcc_invalidation_patched', False):
+        return
+    original = getattr(target, 'invalidateCache', None)
+    if not callable(original):
+        LOGGER.warning('Native item invalidation unavailable; empty syncs remain conservative')
+        return
+
+    def patched(self, diff=None):
+        result = original(self, diff)
+        if SERVICES.itemsCache is not None and self is SERVICES.itemsCache.items:
+            ITEMS_INVALIDATION_CONTEXT.update(result=result, full=diff is None)
+        return result
+
+    target.invalidateCache = patched
+    target._hcc_invalidation_patched = True
+
+
 def _on_items_cache_sync_completed(update_reason, invalid_items=None, *_args, **_kwargs):
     if update_reason not in (CACHE_SYNC_REASON.SHOW_GUI, CACHE_SYNC_REASON.CLIENT_UPDATE,
                              CACHE_SYNC_REASON.SHOP_RESYNC, CACHE_SYNC_REASON.INVENTORY_RESYNC,
@@ -561,9 +583,12 @@ def _on_items_cache_sync_completed(update_reason, invalid_items=None, *_args, **
         _refresh_all_models('items cache sync', invalidate_dossier=True)
         return
 
-    # Full invalidation also returns an empty mapping, so it cannot be treated
-    # as a partial update with no changed vehicles.
-    full_update = (update_reason != CACHE_SYNC_REASON.CLIENT_UPDATE or not invalid_items)
+    # Both full invalidation and settings-only diffs return {}. Use the exact
+    # native result's provenance, never the raw diff's truthiness.
+    context = ITEMS_INVALIDATION_CONTEXT
+    known_partial = invalid_items is not None and invalid_items is context['result'] and not context['full']
+    full_update = (update_reason != CACHE_SYNC_REASON.CLIENT_UPDATE or
+                   (not invalid_items and not known_partial))
     vehicle_ids = set()
     if not full_update:
         vehicle_ids.update(invalid_items.get(GUI_ITEM_TYPE.VEHICLE, ()))
@@ -590,6 +615,7 @@ def _bind_items_cache_sync():
         if items_cache is None or not hasattr(items_cache, 'onSyncCompleted'):
             LOGGER.warning('Items cache sync event unavailable; card-stat sync refresh is disabled')
             return
+        _patch_items_invalidation(items_cache.items)
         items_cache.onSyncCompleted += _on_items_cache_sync_completed
         ITEMS_CACHE_SYNC_BOUND = True
     except Exception:
@@ -675,8 +701,9 @@ def fini():
     DOSSIER_CACHE.clear()
     MARKS_INCOMPLETE_CACHE.clear()
     ALPHA_DAMAGE_CACHE.clear()
-    PERSISTENT_ALPHA_STATE.update(loaded=False, version=None, entries={},
-                                  dirty=False, scheduled=False, disabled=False)
+    PERSISTENT_ALPHA_STATE.update(loaded=False, version=None, entries=OrderedDict(),
+                                  legacy={}, dirty=False, scheduled=False, disabled=False)
+    ITEMS_INVALIDATION_CONTEXT.update(result=None, full=True)
     DOSSIER_CACHE_GENERATION += 1
     LAST_DATA_SUMMARY = None
     LAST_PAYLOAD = None
@@ -1109,21 +1136,35 @@ def _load_persistent_alpha_cache():
         return
     try:
         with io.open(cache_path, 'r', encoding='utf-8') as stream:
-            data = json.load(stream)
+            data = json.load(stream, object_pairs_hook=OrderedDict)
         if not isinstance(data, dict):
             raise ValueError('Expected an alpha-cache object')
-        if data.get('schema') != 1 or data.get('clientVersion') != state['version']:
+        schema = data.get('schema')
+        if schema not in (1, 2) or data.get('clientVersion') != state['version']:
             LOGGER.info('Persistent alpha cache ignored: schema or client version changed')
             return
         entries = data['entries']
         if not isinstance(entries, dict):
             raise ValueError('Expected alpha-cache entries')
-        for key, value in entries.iteritems():
-            if (not isinstance(key, basestring) or len(key) != 64 or
-                    any(c not in '0123456789abcdef' for c in key) or
+        for key, record in entries.iteritems():
+            fingerprint = key if schema == 1 else record.get('fingerprint') if isinstance(record, dict) else None
+            value = record if schema == 1 else record.get('alpha') if isinstance(record, dict) else None
+            if (not isinstance(fingerprint, basestring) or len(fingerprint) != 64 or
+                    any(c not in '0123456789abcdef' for c in fingerprint) or
                     isinstance(value, bool) or not isinstance(value, (int, long)) or value <= 0):
                 raise ValueError('Invalid alpha-cache entry')
-        state['entries'] = entries
+            if schema == 2 and (not isinstance(key, basestring) or not key.isdigit() or
+                                int(key) <= 0 or str(int(key)) != key):
+                raise ValueError('Invalid alpha-cache vehicle ID')
+        if schema == 1:
+            # Old hashes are assigned to vehicles only after live input validation.
+            state['legacy'] = entries
+            LOGGER.info('Legacy alpha cache loaded: %d entries; migrating validated vehicles', len(entries))
+        else:
+            state['entries'] = entries
+        while len(entries) > PERSISTENT_ALPHA_MAX_ENTRIES:
+            entries.popitem(last=False)
+            state['dirty'] = True
         LOGGER.info('Persistent alpha cache loaded: %d entries', len(entries))
     except (IOError, OSError, ValueError, KeyError):
         LOGGER.exception('Unable to load persistent alpha cache; rebuilding native values')
@@ -1142,7 +1183,7 @@ def _save_persistent_alpha_cache():
             os.makedirs(directory)
         descriptor, temporary = tempfile.mkstemp(prefix='alpha_cache-', suffix='.tmp', dir=directory)
         os.close(descriptor)
-        data = {'schema': 1, 'clientVersion': state['version'], 'entries': state['entries']}
+        data = {'schema': 2, 'clientVersion': state['version'], 'entries': state['entries']}
         with io.open(temporary, 'w', encoding='utf-8') as stream:
             stream.write(unicode(json.dumps(data, ensure_ascii=True, separators=(',', ':'))))
             stream.flush()
@@ -1189,7 +1230,7 @@ def _persistent_alpha_key(vehicle):
                   kpi.getFactor('damageAndPiercingDistributionLowerBound'),
                   kpi.getFactor('damageAndPiercingDistributionUpperBound'))
         payload = json.dumps(inputs, allow_nan=False, separators=(',', ':'))
-        return hashlib.sha256(payload).hexdigest()
+        return (str(int(vehicle.intCD)), hashlib.sha256(payload).hexdigest())
     except Exception:
         LOGGER.debug('Unable to validate persistent alpha inputs for vehicle %s',
                      getattr(vehicle, 'intCD', 'unknown'), exc_info=True)
@@ -1200,7 +1241,12 @@ def _remember_persistent_alpha(key, value):
     if key is None:
         return
     state = PERSISTENT_ALPHA_STATE
-    state['entries'][key] = value
+    vehicle_id, fingerprint = key
+    if vehicle_id in state['entries']:
+        del state['entries'][vehicle_id]
+    state['entries'][vehicle_id] = {'fingerprint': fingerprint, 'alpha': value}
+    while len(state['entries']) > PERSISTENT_ALPHA_MAX_ENTRIES:
+        state['entries'].popitem(last=False)
     state['dirty'] = True
     if not state['scheduled']:
         state['scheduled'] = True
@@ -1238,9 +1284,23 @@ def _alpha_damage(vehicle):
     if cache_key is not None and cache_key in ALPHA_DAMAGE_CACHE:
         ALPHA_DAMAGE_STATS['hits'] += 1
         return ALPHA_DAMAGE_CACHE[cache_key]
+    if cache_key is not None:
+        # Do not retain an older setup that could bypass persistent replacement
+        # when the same vehicle switches back to a previous gun or shot.
+        for old_key in list(ALPHA_DAMAGE_CACHE):
+            if old_key[0] == cache_key[0]:
+                del ALPHA_DAMAGE_CACHE[old_key]
     persistent_key = _persistent_alpha_key(vehicle)
     if persistent_key is not None:
-        cached = PERSISTENT_ALPHA_STATE['entries'].get(persistent_key)
+        state = PERSISTENT_ALPHA_STATE
+        vehicle_id, fingerprint = persistent_key
+        record = state['entries'].get(vehicle_id)
+        cached = record['alpha'] if record is not None and record['fingerprint'] == fingerprint else None
+        if cached is None and vehicle_id not in state['entries']:
+            cached = state.get('legacy', {}).get(fingerprint)
+            if cached is not None:
+                _remember_persistent_alpha(persistent_key, cached)
+                del state['legacy'][fingerprint]
         if cached is not None:
             if cache_key is not None:
                 ALPHA_DAMAGE_CACHE[cache_key] = cached
@@ -2207,10 +2267,16 @@ def _patch_vehicle_tooltip():
 
 
 def _is_frontline_filter(provider):
-    carousel_filter = getattr(provider, '_VehicleFiltersDataProvider__carouselFilter', None)
+    carousel_filter = getattr(provider, '_VehicleFiltersDataProvider__filter', None)
+    if carousel_filter is None:
+        carousel_filter = getattr(provider, '_VehicleFiltersDataProvider__carouselFilter', None)
     filter_class = getattr(carousel_filter, '__class__', None)
     filter_module = getattr(filter_class, '__module__', '')
     return filter_module.startswith('frontline.')
+
+
+def _is_frontline_hangar_active():
+    return any((_is_frontline_filter(provider) for provider in list(FILTER_PROVIDERS)))
 
 
 def _is_allowed_hangar_path(space_path):
@@ -2239,16 +2305,12 @@ def _is_hangar_context_active():
         space_path = hangar_space.spacePath
     except Exception:
         space_path = None
-    active = _is_allowed_hangar_path(space_path)
+    active = _is_allowed_hangar_path(space_path) or _is_frontline_hangar_active()
     if active != HANGAR_GUARD_STATE.get('active') or space_path != HANGAR_GUARD_STATE.get('spacePath'):
         HANGAR_GUARD_STATE['active'] = active
         HANGAR_GUARD_STATE['spacePath'] = space_path
         LOGGER.info('hangar context %s for path=%r', 'active' if active else 'inactive', space_path)
     return active
-
-
-def _is_provider_disabled(provider):
-    return _is_frontline_filter(provider)
 
 
 def _reapply_provider_carousel_state(provider):
@@ -2324,13 +2386,8 @@ def _patch_vehicle_filters_provider():
 
     def patched_on_loading(self, *args, **kwargs):
         result = original_on_loading(self, *args, **kwargs)
-        # Track every non-frontline provider regardless of the current hangar
-        # context. The hangar space path can still be stale/updating right
-        # when this fires (e.g. returning from an event hangar), so relying
-        # on a one-shot "is active now" check here would permanently skip
-        # applying the configured row count to this provider instance.
-        if _is_provider_disabled(self):
-            return result
+        # Track the provider before checking the hangar path: Frontline is
+        # identified by its mode-specific filter rather than its space path.
         _add_safe_provider(FILTER_PROVIDERS, self)
         if not _is_hangar_context_active():
             return result
@@ -2352,7 +2409,7 @@ def _patch_vehicle_filters_provider():
 
     if callable(original_update_carousel):
         def patched_update_carousel(self, *args, **kwargs):
-            if not _is_provider_disabled(self) and _is_hangar_context_active():
+            if _is_hangar_context_active():
                 rows = _effective_carousel_rows() if _carousel_auto() else _carousel_rows() or 2
                 if rows != _provider_row_count(self):
                     setattr(self, '_VehicleFiltersDataProvider__rowCount', rows)
