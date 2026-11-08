@@ -1,11 +1,12 @@
 # Hangar Carousel Classic 1.0.25
 
-## Fixes and improvements
+## Changes since 1.0.24
 
-- Include the functional alpha-test improvements in the normal release: native `VehicleParams.avgDamage`, setup-aware alpha caching and payload signatures, targeted cache invalidation, and a bounded cross-session alpha cache with safe migration and writes.
-- Preserve HCC state while the native vehicle inventory is loading, and refresh after the native statistics presenter becomes ready.
 - Apply HCC filtering/sorting to Frontline's rendered carousel list, including active playlists, rather than only the playlist-selection model. Preserve native eligibility/search filtering and the three-/four-row carousel/page-height patch. Frontline layout and filtering were confirmed in game on 2026-11-08.
-- Keep timing instrumentation out of the normal release package.
+- Retain in-memory alpha cache entries during known settings-only updates instead of treating every empty invalid-item mapping as a full reset. Genuine full resets and unknown empty mappings remain conservative.
+- Upgrade the persistent alpha cache to schema 2: one validated record per vehicle, replacing older setups and limiting storage to 4096 vehicle records. Migrate schema-1 values only after matching the live native-input fingerprint.
+
+Native alpha calculation, the original cross-session cache, targeted vehicle invalidation, and inventory-startup state preservation were already included in 1.0.24 and remain unchanged features, not new additions in this release.
 
 ## Compatibility and validation
 
