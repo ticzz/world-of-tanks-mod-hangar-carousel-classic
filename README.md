@@ -4,8 +4,8 @@ Classic-style hangar carousel for World of Tanks 2.x with native Gameface integr
 
 ## Quick Facts
 
-- Current build: 1.0.25
-- Latest release: [v1.0.25](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/tag/v1.0.25)
+- Current build: 1.0.26
+- Latest release: [v1.0.26](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/tag/v1.0.26)
 - Full release notes: [GitHub Releases](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases)
 - Mod ID: hangar.carousel.classic
 - Runtime: WoT embedded Python 2.7
@@ -24,12 +24,12 @@ Classic-style hangar carousel for World of Tanks 2.x with native Gameface integr
 - Nation/type priority layers for deterministic grouping.
 - Version 1.0.23 restores native rented-filter behavior based on Aslain's hotfix and reduces repeated garage-stat work.
 - Version 1.0.24 removes the 256-dossier limit for correct marks filtering, badge counts, and card stats in large garages. Thanks to Aslain for the detailed follow-up in [issue #4](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/issues/4#issuecomment-6509364155). Dossier and alpha-damage caches remain enabled; initial-build latency is not claimed to be fixed.
-- Final 1.0.25 packages: [standalone WOTMOD](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.25/mod_hangar_carousel_classic_1.0.25.wotmod) and [full ZIP](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.25/hangar_carousel_classic_1.0.25_full.zip). The normal package includes the functional alpha-test fixes without timing instrumentation, plus the Frontline carousel height and filtering fixes confirmed in game. All 71 Python 2.7 regression tests pass.
+- Final 1.0.26 packages: [standalone WOTMOD](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.26/mod_hangar_carousel_classic_1.0.26.wotmod) and [full ZIP](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.26/hangar_carousel_classic_1.0.26_full.zip). This release detects modded hangars through the native carousel provider instead of relying only on known space paths. Python 2.7 compilation and all 21 targeted inventory-lifecycle regression tests pass.
 - Frontline filter follow-up: HCC filters and sorting now also reach the actual rendered carousel inventory list, including active playlists. The previous playlist-selection-only patch did not change displayed vehicles. Run `node tools/test_frontline_filters.js`; the user confirmed Frontline filtering in game on 2026-11-08.
 
 ## Separate loading-time diagnostic build
 
-- Build with Python 2.7: `python tools/build_diagnostic.py`, after building the normal 1.0.25 package. This creates a version-matched diagnostic WOTMOD without changing the base source or normal packages.
+- Build with Python 2.7: `python tools/build_diagnostic.py`, after building the normal package. This creates a version-matched diagnostic WOTMOD without changing the base source or normal packages.
 - For testing, replace the existing Classic WOTMOD with the diagnostic WOTMOD; do not install both. Keep the existing GameFace dependency. Restore the normal WOTMOD after testing.
 - Restart the game, enter the garage, then turn card statistics off and back on in the mod settings to request a second complete stats build without restarting. Send the matching `HCC DIAG` lines from `game.log`, including the initial build.
 - Each rebuilt payload produces one diagnostic summary: payload/statistics milliseconds, alpha-damage milliseconds, actual vehicle-dossier fetch milliseconds, dossier-value extraction milliseconds, alpha cache reuse/computations, and dossier cache hits/misses/fetches. Lightweight refreshes do not produce a summary. Failed measured builds are marked `complete=False`; existing exceptions still propagate.
@@ -69,7 +69,7 @@ The separate `dist/mod_hangar_carousel_classic_1.0.24-lifecycle-test.wotmod` con
 ## How to Install (using .wotmod only)
 
 - See the complete [installation guide](docs/INSTALLATION.md).
-- First, download the [v1.0.25 release](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/tag/v1.0.25).
+- First, download the [v1.0.26 release](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/tag/v1.0.26).
 - Copy the `.wotmod` file into your World of Tanks client's mods directory. 
 For instance, you might place it in a path like `G:/Games/World_of_Tanks_EU/mods/2.4.1.1/`.
 - The standalone WOTMOD requires `net.openwg.gameface_1.2.2.wotmod` or newer in the same client mods folder. The full package already includes GameFace 1.2.2.
@@ -80,28 +80,28 @@ For instance, you might place it in a path like `G:/Games/World_of_Tanks_EU/mods
 
 ## Full Package Installation
 
-- If you choose the complete package, [hangar_carousel_classic_1.0.25_full.zip](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.25/hangar_carousel_classic_1.0.25_full.zip) includes the carousel mod and GameFace 1.2.2 in `mods/2.4.1.1/`. Extract it directly into the World of Tanks installation directory. Aslain's Mod Menu and ModsSettingsBridge are intentionally omitted; get or update them separately via [Aslain's WoT ModPack](https://aslain.com/index.php?/topic/13-download-%E2%98%85-world-of-tanks-%E2%98%85-modpack/) if needed.
+- If you choose the complete package, [hangar_carousel_classic_1.0.26_full.zip](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.26/hangar_carousel_classic_1.0.26_full.zip) includes the carousel mod and GameFace 1.2.2 in `mods/2.4.1.1/`. Extract it directly into the World of Tanks installation directory. Aslain's Mod Menu and ModsSettingsBridge are intentionally omitted; get or update them separately via [Aslain's WoT ModPack](https://aslain.com/index.php?/topic/13-download-%E2%98%85-world-of-tanks-%E2%98%85-modpack/) if needed.
 
 ## Build Locally
 
 ```powershell
 ./tools/build.ps1
-./tools/validate.ps1 -PackagePath ./dist/mod_hangar_carousel_classic_1.0.25.wotmod
-./tools/install.ps1 -GameRoot G:/Games/World_of_Tanks_EU -PackagePath ./dist/mod_hangar_carousel_classic_1.0.25.wotmod
+./tools/validate.ps1 -PackagePath ./dist/mod_hangar_carousel_classic_1.0.26.wotmod
+./tools/install.ps1 -GameRoot G:/Games/World_of_Tanks_EU -PackagePath ./dist/mod_hangar_carousel_classic_1.0.26.wotmod
 ```
 
 ## Documentation
 
 - Detailed feature/config/build docs: [docs/TECHNICAL_DETAILS.md](docs/TECHNICAL_DETAILS.md)
-- Current build details: [docs/RELEASE_NOTES_1.0.25.md](docs/RELEASE_NOTES_1.0.25.md)
+- Current build details: [docs/RELEASE_NOTES_1.0.26.md](docs/RELEASE_NOTES_1.0.26.md)
 - Security summary: [EXECUTIVE_SUMMARY.md](EXECUTIVE_SUMMARY.md)
 - Security audit: [SECURITY_AUDIT_REPORT.md](SECURITY_AUDIT_REPORT.md)
 
 ## Quick Links
 
 - Releases overview: [GitHub Releases](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases)
-- Current package (v1.0.25): [mod_hangar_carousel_classic_1.0.25.wotmod](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.25/mod_hangar_carousel_classic_1.0.25.wotmod)
-- Current full package (v1.0.25): [hangar_carousel_classic_1.0.25_full.zip](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.25/hangar_carousel_classic_1.0.25_full.zip)
+- Current package (v1.0.26): [mod_hangar_carousel_classic_1.0.26.wotmod](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.26/mod_hangar_carousel_classic_1.0.26.wotmod)
+- Current full package (v1.0.26): [hangar_carousel_classic_1.0.26_full.zip](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.26/hangar_carousel_classic_1.0.26_full.zip)
 - Full technical docs: [docs/TECHNICAL_DETAILS.md](docs/TECHNICAL_DETAILS.md)
 - Main mod source: [res/scripts/client/gui/mods/mod_hangar_carousel_classic.py](res/scripts/client/gui/mods/mod_hangar_carousel_classic.py)
 - Frontend assets: [res/gui/gameface/mods/hcc/hangar_carousel_classic](res/gui/gameface/mods/hcc/hangar_carousel_classic)

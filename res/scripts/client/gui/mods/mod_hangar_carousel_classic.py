@@ -50,7 +50,7 @@ try:
 except Exception:
     carousel_filter_module = None
 MOD_ID = 'mod_hangar_carousel_classic'
-MOD_VERSION = '1.0.25'
+MOD_VERSION = '1.0.26'
 MOD_LINKAGE_ID = 'mod_hangar.carousel.classic'
 PLAYLIST_ID_PREFIX = 'mhcc_'
 PREFERENCES_DIR = getPreferencesDirPath()
@@ -2266,17 +2266,9 @@ def _patch_vehicle_tooltip():
     CarouselVehicleTooltipModel._hcc_patched = True
 
 
-def _is_frontline_filter(provider):
-    carousel_filter = getattr(provider, '_VehicleFiltersDataProvider__filter', None)
-    if carousel_filter is None:
-        carousel_filter = getattr(provider, '_VehicleFiltersDataProvider__carouselFilter', None)
-    filter_class = getattr(carousel_filter, '__class__', None)
-    filter_module = getattr(filter_class, '__module__', '')
-    return filter_module.startswith('frontline.')
-
-
-def _is_frontline_hangar_active():
-    return any((_is_frontline_filter(provider) for provider in list(FILTER_PROVIDERS)))
+def _has_tracked_carousel_provider():
+    """Return whether a live native carousel provider has been loaded."""
+    return bool(FILTER_PROVIDERS)
 
 
 def _is_allowed_hangar_path(space_path):
@@ -2287,11 +2279,12 @@ def _is_allowed_hangar_path(space_path):
 
 
 def _is_hangar_context_active():
-    """Enable the mod only in hangars with a supported carousel integration.
+    """Enable HCC for known spaces or while a native carousel is loaded.
 
     Fail-closed while the hangar space is still loading, because the client
     restores the last used game mode on startup and may open an event hangar
-    directly. Space events re-evaluate the state as soon as it is known.
+    directly. Modded hangars can use different space paths while still using
+    the native carousel provider.
     """
     if dependency is None or IHangarSpace is None:
         return True
@@ -2305,7 +2298,7 @@ def _is_hangar_context_active():
         space_path = hangar_space.spacePath
     except Exception:
         space_path = None
-    active = _is_allowed_hangar_path(space_path) or _is_frontline_hangar_active()
+    active = _is_allowed_hangar_path(space_path) or _has_tracked_carousel_provider()
     if active != HANGAR_GUARD_STATE.get('active') or space_path != HANGAR_GUARD_STATE.get('spacePath'):
         HANGAR_GUARD_STATE['active'] = active
         HANGAR_GUARD_STATE['spacePath'] = space_path
@@ -2386,8 +2379,7 @@ def _patch_vehicle_filters_provider():
 
     def patched_on_loading(self, *args, **kwargs):
         result = original_on_loading(self, *args, **kwargs)
-        # Track the provider before checking the hangar path: Frontline is
-        # identified by its mode-specific filter rather than its space path.
+        was_active = HANGAR_GUARD_STATE.get('active')
         _add_safe_provider(FILTER_PROVIDERS, self)
         if not _is_hangar_context_active():
             return result
@@ -2405,6 +2397,8 @@ def _patch_vehicle_filters_provider():
                 _sync_provider_row_count(self, rows, force=True)
         except Exception:
             LOGGER.exception('Unable to apply HCC carousel row configuration')
+        if was_active is False:
+            _refresh_all_models('carousel provider became available')
         return result
 
     if callable(original_update_carousel):
@@ -2421,6 +2415,7 @@ def _patch_vehicle_filters_provider():
         LOGGER.warning('Native carousel update method unavailable; HCC row enforcement is disabled')
 
     def patched_finalize(self):
+        was_active = HANGAR_GUARD_STATE.get('active')
         try:
             if self in FILTER_PROVIDERS:
                 # Create copy to avoid iterator invalidation during concurrent iteration
@@ -2430,7 +2425,12 @@ def _patch_vehicle_filters_provider():
         except Exception as e:
             LOGGER.warning('Error removing filter provider: %s', e)
         finally:
-            original_finalize(self)
+            try:
+                original_finalize(self)
+            finally:
+                if (was_active is True and HANGAR_GUARD_STATE.get('active') is not False
+                        and not _is_hangar_context_active()):
+                    _refresh_all_models('carousel provider finalized')
 
     VehicleFiltersDataProvider._onLoading = patched_on_loading
     VehicleFiltersDataProvider._finalize = patched_finalize

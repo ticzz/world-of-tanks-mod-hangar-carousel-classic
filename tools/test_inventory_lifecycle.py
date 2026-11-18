@@ -45,7 +45,7 @@ class InventoryLifecycleTests(unittest.TestCase):
             tree = ast.parse(stream.read(), source)
         names = ('_inventory_vehicles', '_build_payload', '_publish_payload',
                  '_patch_vehicle_statistics_presenter', '_add_safe_provider',
-                 '_is_frontline_filter', '_is_frontline_hangar_active',
+                 '_has_tracked_carousel_provider',
                  '_is_allowed_hangar_path', '_is_hangar_context_active',
                  '_normalized_card_stats_config', '_refresh_all_models',
                  '_native_provider_method', '_refresh_native_provider',
@@ -149,30 +149,31 @@ class InventoryLifecycleTests(unittest.TestCase):
         self.assertEqual(payload['stats'], {})
         self.assertTrue(payload['hangarActive'])
 
-    def test_frontline_hangar_is_detected_from_its_native_filter(self):
-        frontline_filter_class = type(
-            'BattleCarouselFilter', (), {'__module__': 'frontline.gui.carousel_filter'})
-        frontline_filter = frontline_filter_class()
+    def test_modded_hangar_is_detected_from_its_tracked_carousel_provider(self):
+        custom_filter_class = type(
+            'CarouselFilter', (), {'__module__': 'custom_hangar.carousel_filter'})
+        custom_filter = custom_filter_class()
         provider = type('Provider', (), {
-            '_VehicleFiltersDataProvider__filter': frontline_filter})()
+            '_VehicleFiltersDataProvider__filter': custom_filter})()
         self.ns['FILTER_PROVIDERS'].append(provider)
-        space = type('HangarSpace', (), {'spacePath': 'spaces/frontline'})()
+        space = type('HangarSpace', (), {'spacePath': 'spaces/custom_hangar'})()
         self.ns['dependency'] = type('Dependency', (), {
             'instance': lambda self, interface: space})()
         self.ns['IHangarSpace'] = object()
         self.ns['HANGAR_GUARD_STATE'] = {'active': None, 'spacePath': None}
-        self.ns['ALLOWED_HANGAR_PREFIXES'] = ('spaces/hangar_v4', 'spaces/h33_comp7')
 
-        self.assertTrue(self.ns['_is_frontline_filter'](provider))
-        self.assertTrue(self.ns['_is_frontline_hangar_active']())
+        self.assertTrue(self.ns['_has_tracked_carousel_provider']())
         self.assertTrue(self.ns['_is_hangar_context_active']())
 
-        standard_filter_class = type(
-            'CarouselFilter', (), {'__module__': 'gui.filters.carousel_filter'})
-        standard_provider = type('Provider', (), {
-            '_VehicleFiltersDataProvider__filter': standard_filter_class()})()
-        self.assertFalse(self.ns['_is_frontline_filter'](standard_provider))
-        self.ns['FILTER_PROVIDERS'] = [standard_provider]
+        self.ns['FILTER_PROVIDERS'] = []
+        self.assertFalse(self.ns['_is_hangar_context_active']())
+
+    def test_igr_path_alone_does_not_enable_an_untracked_hangar(self):
+        space = type('HangarSpace', (), {'spacePath': 'spaces/hangar_igr'})()
+        self.ns['dependency'] = type('Dependency', (), {
+            'instance': lambda self, interface: space})()
+        self.ns['IHangarSpace'] = object()
+
         self.assertFalse(self.ns['_is_hangar_context_active']())
 
     def test_native_update_recovers_without_polling_and_finalize_waits_again(self):
