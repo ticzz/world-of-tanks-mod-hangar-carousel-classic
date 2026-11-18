@@ -36,7 +36,13 @@ const context = vm.createContext({
     querySelectorAll: () => cards,
     createElement: () => new Element()
   },
-  window: { subViews: { ids: () => [1], get: () => ({ model: { hangarCarouselClassic: model } }) } },
+  window: {
+    subViews: { ids: () => [1], get: () => ({ model: { hangarCarouselClassic: model } }) },
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    requestAnimationFrame: () => 0,
+    cancelAnimationFrame: () => {}
+  },
   engine: { whenReady: { then: () => {} } },
   requestAnimationFrame: () => {},
   console: { warn: () => {}, error: (...args) => { throw new Error(args.join(" ")); } }

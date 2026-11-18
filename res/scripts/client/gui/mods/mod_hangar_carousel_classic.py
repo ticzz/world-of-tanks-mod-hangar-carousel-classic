@@ -50,7 +50,7 @@ try:
 except Exception:
     carousel_filter_module = None
 MOD_ID = 'mod_hangar_carousel_classic'
-MOD_VERSION = '1.0.26'
+MOD_VERSION = '1.0.27'
 MOD_LINKAGE_ID = 'mod_hangar.carousel.classic'
 PLAYLIST_ID_PREFIX = 'mhcc_'
 PREFERENCES_DIR = getPreferencesDirPath()
@@ -256,7 +256,7 @@ def _patch_carousel_filter_compat():
                 return None
 
         patched_method._hcc_wrapped = True
-        setattr(target, method_name, patched_method)
+        _install_native_patch(target, method_name, patched_method)
         return True
 
     patched = False
@@ -266,7 +266,7 @@ def _patch_carousel_filter_compat():
             patched = _wrap_target(value, '_setCanInstallAttachmentsCriteria') or patched
 
     if patched:
-        carousel_filter_module._hcc_can_install_attachments_patched = True
+        _install_native_patch(carousel_filter_module, '_hcc_can_install_attachments_patched', True)
 
 
 def _deep_merge(base, override):
@@ -374,8 +374,6 @@ CONFIG = _load_config()
 RUNTIME_STATE = _load_runtime()
 if not os.path.isfile(CONFIG_PATH) and os.path.isfile(LEGACY_CONFIG_PATH):
     CONFIG_NEEDS_SAVE = True
-if not os.path.isfile(RUNTIME_PATH) and os.path.isfile(LEGACY_RUNTIME_PATH):
-    _save_runtime()
 ACTIVE_FILTERS = set((filter_id for filter_id in RUNTIME_STATE.get('activeFilters', []) if filter_id in FILTER_ORDER and filter_id != 'all'))
 MODELS = []
 FILTER_PROVIDERS = []
@@ -390,10 +388,16 @@ LEGACY_PLAYLISTS_REMOVED = False
 TOOLTIP_PAYLOAD_LOGGED = False
 ALLOWED_HANGAR_PREFIXES = ('spaces/hangar_v4', 'spaces/h33_comp7')
 HANGAR_GUARD_STATE = {'active': None, 'spacePath': None}
+HANGAR_SPACE_INSTANCE = None
+HANGAR_SPACE_EVENTS_BOUND = []
 SETTINGS_REGISTERED = False
+MSA_CALLBACK_REGISTERED = False
 MSA_API = None
 MSA_SETTINGS = {}
 MSA_SYNCING = False
+PATCHED_ATTRIBUTES = []
+PATCHED_MAPPING_VALUES = []
+_PATCH_MISSING = object()
 SETTINGS_REGISTRATION_STATE = {
     'tries': 0,
     'delay': 0.35,
@@ -570,8 +574,52 @@ def _patch_items_invalidation(items):
             ITEMS_INVALIDATION_CONTEXT.update(result=result, full=diff is None)
         return result
 
-    target.invalidateCache = patched
-    target._hcc_invalidation_patched = True
+    _install_native_patch(target, 'invalidateCache', patched)
+    _install_native_patch(target, '_hcc_invalidation_patched', True)
+
+
+def _install_native_patch(target, name, replacement):
+    namespace = getattr(target, '__dict__', {})
+    previous = namespace.get(name, _PATCH_MISSING)
+    setattr(target, name, replacement)
+    PATCHED_ATTRIBUTES.append((target, name, previous, replacement))
+
+
+def _install_native_mapping_patch(mapping, key, replacement):
+    previous = mapping.get(key, _PATCH_MISSING)
+    mapping[key] = replacement
+    PATCHED_MAPPING_VALUES.append((mapping, key, previous, replacement))
+
+
+def _restore_native_patches():
+    while PATCHED_ATTRIBUTES:
+        target, name, previous, replacement = PATCHED_ATTRIBUTES.pop()
+        namespace = getattr(target, '__dict__', {})
+        if namespace.get(name, _PATCH_MISSING) is not replacement:
+            LOGGER.warning('Cannot restore patched attribute %s.%s; it was changed after HCC',
+                           getattr(target, '__name__', target.__class__.__name__), name)
+            continue
+        try:
+            if previous is _PATCH_MISSING:
+                delattr(target, name)
+            else:
+                setattr(target, name, previous)
+        except Exception:
+            LOGGER.exception('Unable to restore patched attribute %s.%s',
+                             getattr(target, '__name__', target.__class__.__name__), name)
+
+    while PATCHED_MAPPING_VALUES:
+        mapping, key, previous, replacement = PATCHED_MAPPING_VALUES.pop()
+        if mapping.get(key, _PATCH_MISSING) is not replacement:
+            LOGGER.warning('Cannot restore patched mapping key %r; it was changed after HCC', key)
+            continue
+        try:
+            if previous is _PATCH_MISSING:
+                del mapping[key]
+            else:
+                mapping[key] = previous
+        except Exception:
+            LOGGER.exception('Unable to restore patched mapping key %r', key)
 
 
 def _on_items_cache_sync_completed(update_reason, invalid_items=None, *_args, **_kwargs):
@@ -671,8 +719,11 @@ def _refresh_native_provider(provider):
     return True
 
 
-def fini():
-    global SETTINGS_REGISTERED, DOSSIER_CACHE_GENERATION, FINAL_VISIBLE_VEHICLE_COUNT, LAST_DATA_SUMMARY, LAST_PAYLOAD, LAST_PAYLOAD_SIGNATURE, TOOLTIP_PAYLOAD_LOGGED, LEGACY_PLAYLISTS_REMOVED, CONFIG, RUNTIME_STATE, ACTIVE_FILTERS, MSA_API, MSA_SETTINGS, MSA_SYNCING, INVENTORY_WAIT_STATE
+def fini(preserve_settings_callback=False):
+    global SETTINGS_REGISTERED, DOSSIER_CACHE_GENERATION, FINAL_VISIBLE_VEHICLE_COUNT, LAST_DATA_SUMMARY, LAST_PAYLOAD, LAST_PAYLOAD_SIGNATURE, TOOLTIP_PAYLOAD_LOGGED, LEGACY_PLAYLISTS_REMOVED, CONFIG, RUNTIME_STATE, ACTIVE_FILTERS, MSA_API, MSA_SETTINGS, MSA_SYNCING, MSA_CALLBACK_REGISTERED, INVENTORY_WAIT_STATE
+    settings_callback_removed = True
+    if not preserve_settings_callback:
+        settings_callback_removed = _unregister_settings_callback()
     try:
         g_playerEvents.onAvatarReady -= _track_last_played
     except Exception:
@@ -684,6 +735,7 @@ def fini():
         pass
     _unbind_dossiers_resync()
     _unbind_items_cache_sync()
+    _unbind_hangar_space_events()
     _save_persistent_alpha_cache()
     while CALLBACK_IDS:
         callback_id = CALLBACK_IDS.pop()
@@ -693,6 +745,7 @@ def fini():
             # Can happen if the callback fired between the pop above and this
             # call; not an error, so avoid warning-level log spam on exit.
             LOGGER.debug('Unable to cancel callback %s', callback_id)
+    _restore_native_patches()
     MODELS[:] = []
     FILTER_PROVIDERS[:] = []
     STATISTICS_PRESENTERS[:] = []
@@ -714,9 +767,13 @@ def fini():
     RUNTIME_STATE = {}
     ACTIVE_FILTERS = set()  # Reinit; clear() unnecessary
     SETTINGS_REGISTERED = False
-    MSA_API = None
-    MSA_SETTINGS = {}
+    if not preserve_settings_callback and settings_callback_removed:
+        MSA_API = None
+        MSA_SETTINGS = {}
+        MSA_CALLBACK_REGISTERED = False
     MSA_SYNCING = False
+    PATCHED_ATTRIBUTES[:] = []
+    PATCHED_MAPPING_VALUES[:] = []
 
 
 def _save_config():
@@ -746,6 +803,14 @@ def _save_runtime():
             runtime_file.write(payload)
     except Exception:
         LOGGER.exception('Unable to save runtime state at %s', RUNTIME_PATH)
+
+
+def _migrate_legacy_runtime_if_needed():
+    if not os.path.isfile(RUNTIME_PATH) and os.path.isfile(LEGACY_RUNTIME_PATH):
+        _save_runtime()
+
+
+_migrate_legacy_runtime_if_needed()
 
 
 if CONFIG_NEEDS_SAVE:
@@ -954,6 +1019,21 @@ def _refresh_native_vehicle_model():
             _refresh_native_provider(provider)
         except Exception:
             LOGGER.exception('Unable to refresh native carousel filter provider')
+
+
+def _show_native_carousel():
+    _publish_payload({'version': MOD_VERSION, 'enabled': False, 'hangarActive': False})
+    for provider in list(FILTER_PROVIDERS):
+        try:
+            with provider.viewModel.transaction() as model:
+                model.setHccCarouselAuto(False)
+                model.setHccSortJson('{}')
+            # None makes the native presenter read the game's row preference.
+            setattr(provider, '_VehicleFiltersDataProvider__rowCount', None)
+            _refresh_native_provider(provider)
+        except Exception:
+            LOGGER.exception('Unable to restore the native carousel after disabling HCC')
+    _refresh_statistics_presenters()
 
 
 def _refresh_statistics_presenters():
@@ -1620,6 +1700,8 @@ def _get_sort_value(vehicle, criterion, account_random_stats, vehicle_cuts):
 
 def _build_sort_json(account_random_stats=None, vehicle_cuts=None):
     """Build JSON payload with hierarchical sorting criteria (nation -> type -> tier etc.)."""
+    if not CONFIG.get('enabled', True):
+        return '{}'
     sorting_enabled = bool(CONFIG.get('sorting', {}).get('enabled', True))
     filtering_enabled = bool(CONFIG.get('filtering', {}).get('enabled', True))
     sorting_criteria = [] if (not sorting_enabled or _sort_mode() == 'default') else _get_configured_sorting_criteria()
@@ -1774,7 +1856,7 @@ def _set_sorting(mode, descending=None):
     return
 def _remove_legacy_playlists():
     global LEGACY_PLAYLISTS_REMOVED
-    if LEGACY_PLAYLISTS_REMOVED or not SERVICES.playlists.isEnabled:
+    if not CONFIG.get('enabled', True) or LEGACY_PLAYLISTS_REMOVED or not SERVICES.playlists.isEnabled:
         return
     # Prevent concurrent execution via flag check-and-set pattern
     if LEGACY_PLAYLISTS_REMOVED:
@@ -1800,6 +1882,8 @@ def _remove_legacy_playlists():
 
 
 def _track_last_played():
+    if not CONFIG.get('enabled', True):
+        return
     try:
         if getattr(BattleReplay.g_replayCtrl, 'isPlaying', False):
             return
@@ -2109,6 +2193,8 @@ class HangarCarouselClassicModel(ViewModel):
             LOGGER.exception('Unable to refresh Hangar Carousel Classic data')
 
     def __on_toggle_filter(self, args):
+        if not CONFIG.get('enabled', True):
+            return
         try:
             filter_id = args.get('filterId') if args else None
             if filter_id:
@@ -2117,16 +2203,22 @@ class HangarCarouselClassicModel(ViewModel):
             LOGGER.exception('Unable to toggle filter state')
 
     def __on_refresh(self, *_args, **_kwargs):
+        if not CONFIG.get('enabled', True):
+            return
         _refresh_native_vehicle_model()
         self.refresh()
 
     def __on_set_carousel_rows(self, args):
+        if not CONFIG.get('enabled', True):
+            return
         try:
             _set_carousel_rows(args.get('rows', 2) if args else 2)
         except Exception:
             LOGGER.exception('Unable to change carousel row count')
 
     def __on_set_sorting(self, args):
+        if not CONFIG.get('enabled', True):
+            return
         try:
             if args:
                 descending = args.get("descending", None)
@@ -2178,7 +2270,7 @@ def _patch_vehicle_filter_model():
         except Exception:
             LOGGER.exception('Unable to inject Gameface assets; carousel features may be unavailable')
         self._addViewModelProperty('hangarCarouselClassic', HangarCarouselClassicModel())
-        self._addBoolProperty('hccCarouselAuto', _carousel_auto())
+        self._addBoolProperty('hccCarouselAuto', CONFIG.get('enabled', True) and _carousel_auto())
         sort_json = _build_sort_json()
         self._addStringProperty('hccSortJson', sort_json if sort_json is not None else '{}')
 
@@ -2194,13 +2286,13 @@ def _patch_vehicle_filter_model():
     def set_hcc_sort_json(self, value):
         self._setString(7, value)
 
-    VehicleFilterModel.__init__ = patched_init
-    VehicleFilterModel._initialize = patched_initialize
-    VehicleFilterModel.getHccCarouselAuto = get_hcc_carousel_auto
-    VehicleFilterModel.setHccCarouselAuto = set_hcc_carousel_auto
-    VehicleFilterModel.getHccSortJson = get_hcc_sort_json
-    VehicleFilterModel.setHccSortJson = set_hcc_sort_json
-    VehicleFilterModel._hcc_patched = True
+    _install_native_patch(VehicleFilterModel, '__init__', patched_init)
+    _install_native_patch(VehicleFilterModel, '_initialize', patched_initialize)
+    _install_native_patch(VehicleFilterModel, 'getHccCarouselAuto', get_hcc_carousel_auto)
+    _install_native_patch(VehicleFilterModel, 'setHccCarouselAuto', set_hcc_carousel_auto)
+    _install_native_patch(VehicleFilterModel, 'getHccSortJson', get_hcc_sort_json)
+    _install_native_patch(VehicleFilterModel, 'setHccSortJson', set_hcc_sort_json)
+    _install_native_patch(VehicleFilterModel, '_hcc_patched', True)
 
 
 def _build_tooltip_payload(vehicle):
@@ -2259,11 +2351,12 @@ def _patch_vehicle_tooltip():
 
         return result
 
-    CarouselVehicleTooltipModel.__init__ = patched_model_init
-    CarouselVehicleTooltipModel._initialize = patched_model_initialize
-    CarouselVehicleTooltipModel.hangarCarouselClassicTooltip = property(get_hcc_tooltip_model)
-    CarouselVehicleTooltipView._onLoading = patched_view_loading
-    CarouselVehicleTooltipModel._hcc_patched = True
+    _install_native_patch(CarouselVehicleTooltipModel, '__init__', patched_model_init)
+    _install_native_patch(CarouselVehicleTooltipModel, '_initialize', patched_model_initialize)
+    _install_native_patch(CarouselVehicleTooltipModel, 'hangarCarouselClassicTooltip',
+                          property(get_hcc_tooltip_model))
+    _install_native_patch(CarouselVehicleTooltipView, '_onLoading', patched_view_loading)
+    _install_native_patch(CarouselVehicleTooltipModel, '_hcc_patched', True)
 
 
 def _has_tracked_carousel_provider():
@@ -2286,6 +2379,8 @@ def _is_hangar_context_active():
     directly. Modded hangars can use different space paths while still using
     the native carousel provider.
     """
+    if not CONFIG.get('enabled', True):
+        return False
     if dependency is None or IHangarSpace is None:
         return True
     try:
@@ -2341,6 +2436,7 @@ def _on_hangar_space_event(*_args, **_kwargs):
 
 
 def _bind_hangar_space_events():
+    global HANGAR_SPACE_INSTANCE
     if HANGAR_GUARD_STATE.get('bound') or dependency is None or IHangarSpace is None:
         return
     try:
@@ -2356,21 +2452,41 @@ def _bind_hangar_space_events():
         _register_callback(delay + random.uniform(0.0, 0.2), _bind_hangar_space_events)
         return
     try:
-        hangar_space.onSpaceCreate += _on_hangar_space_event
-        hangar_space.onSpaceChanged += _on_hangar_space_event
-        hangar_space.onSpaceDestroy += _on_hangar_space_event
+        HANGAR_SPACE_INSTANCE = hangar_space
+        for event_name in ('onSpaceCreate', 'onSpaceChanged', 'onSpaceDestroy'):
+            event = getattr(hangar_space, event_name)
+            event += _on_hangar_space_event
+            HANGAR_SPACE_EVENTS_BOUND.append(event_name)
+            setattr(hangar_space, event_name, event)
         HANGAR_GUARD_STATE['bound'] = True
     except Exception:
-        LOGGER.debug('Unable to bind hangar space events', exc_info=True)
+        LOGGER.exception('Unable to bind hangar space events')
+        _unbind_hangar_space_events()
+
+
+def _unbind_hangar_space_events():
+    global HANGAR_SPACE_INSTANCE
+    if HANGAR_SPACE_INSTANCE is not None:
+        for event_name in reversed(HANGAR_SPACE_EVENTS_BOUND[:]):
+            try:
+                event = getattr(HANGAR_SPACE_INSTANCE, event_name)
+                event -= _on_hangar_space_event
+                setattr(HANGAR_SPACE_INSTANCE, event_name, event)
+            except Exception:
+                LOGGER.exception('Unable to unbind hangar space event %s', event_name)
+    HANGAR_SPACE_EVENTS_BOUND[:] = []
+    HANGAR_SPACE_INSTANCE = None
+    HANGAR_GUARD_STATE.update(active=None, spacePath=None, bound=False)
 
 
 def _patch_vehicle_filters_provider():
     if getattr(VehicleFiltersDataProvider, '_hcc_rows_patched', False):
         return
+    load_hook_token = object()
     row_count_types = getattr(vehicle_filters_presenter_module, '_CAROUSEL_ROW_COUNT_TYPE', None)
     if isinstance(row_count_types, dict) and 2 in row_count_types:
-        row_count_types[3] = row_count_types[2]
-        row_count_types[4] = row_count_types[2]
+        _install_native_mapping_patch(row_count_types, 3, row_count_types[2])
+        _install_native_mapping_patch(row_count_types, 4, row_count_types[2])
     else:
         LOGGER.warning('Native carousel row-count mapping unavailable; 3/4-row selector changes may fail')
     original_on_loading = VehicleFiltersDataProvider._onLoading
@@ -2379,6 +2495,9 @@ def _patch_vehicle_filters_provider():
 
     def patched_on_loading(self, *args, **kwargs):
         result = original_on_loading(self, *args, **kwargs)
+        # A later mod can keep this wrapper in its chain across HCC reloads.
+        if getattr(VehicleFiltersDataProvider, '_hcc_rows_patched', None) is not load_hook_token:
+            return result
         was_active = HANGAR_GUARD_STATE.get('active')
         _add_safe_provider(FILTER_PROVIDERS, self)
         if not _is_hangar_context_active():
@@ -2410,7 +2529,9 @@ def _patch_vehicle_filters_provider():
                     LOGGER.info('Enforcing %d HCC carousel rows for %s', rows, self.__class__.__name__)
             return original_update_carousel(self, *args, **kwargs)
 
-        VehicleFiltersDataProvider._VehicleFiltersDataProvider__updateCarousel = patched_update_carousel
+        _install_native_patch(VehicleFiltersDataProvider,
+                              '_VehicleFiltersDataProvider__updateCarousel',
+                              patched_update_carousel)
     else:
         LOGGER.warning('Native carousel update method unavailable; HCC row enforcement is disabled')
 
@@ -2432,9 +2553,9 @@ def _patch_vehicle_filters_provider():
                         and not _is_hangar_context_active()):
                     _refresh_all_models('carousel provider finalized')
 
-    VehicleFiltersDataProvider._onLoading = patched_on_loading
-    VehicleFiltersDataProvider._finalize = patched_finalize
-    VehicleFiltersDataProvider._hcc_rows_patched = True
+    _install_native_patch(VehicleFiltersDataProvider, '_onLoading', patched_on_loading)
+    _install_native_patch(VehicleFiltersDataProvider, '_finalize', patched_finalize)
+    _install_native_patch(VehicleFiltersDataProvider, '_hcc_rows_patched', load_hook_token)
 
 
 def _patch_vehicle_statistics_presenter():
@@ -2470,11 +2591,13 @@ def _patch_vehicle_statistics_presenter():
                 LOGGER.exception('Unable to apply automatic rows from statistics presenter')
         _refresh_all_models('statistics presenter update')
 
-    VehiclesStatisticsPresenter.__init__ = patched_init
-    VehiclesStatisticsPresenter._finalize = patched_finalize
+    _install_native_patch(VehiclesStatisticsPresenter, '__init__', patched_init)
+    _install_native_patch(VehiclesStatisticsPresenter, '_finalize', patched_finalize)
     if original_update_vehicles:
-        VehiclesStatisticsPresenter._VehiclesStatisticsPresenter__updateVehicles = patched_update_vehicles
-    VehiclesStatisticsPresenter._hcc_patched = True
+        _install_native_patch(VehiclesStatisticsPresenter,
+                              '_VehiclesStatisticsPresenter__updateVehicles',
+                              patched_update_vehicles)
+    _install_native_patch(VehiclesStatisticsPresenter, '_hcc_patched', True)
 
 
 def _patch_legacy_playlist_cleanup():
@@ -2486,8 +2609,8 @@ def _patch_legacy_playlist_cleanup():
         _remove_legacy_playlists()
         return original_on_loading(self, *args, **kwargs)
 
-    VehiclePlaylistsPresenter._onLoading = patched_on_loading
-    VehiclePlaylistsPresenter._hcc_cleanup_patched = True
+    _install_native_patch(VehiclePlaylistsPresenter, '_onLoading', patched_on_loading)
+    _install_native_patch(VehiclePlaylistsPresenter, '_hcc_cleanup_patched', True)
 
 
 def _settings_tooltip(title, body):
@@ -2567,20 +2690,36 @@ def _schedule_settings_registration():
     state['delay'] = min(max(0.35, current_delay * 1.6), float(state.get('maxDelay', 8.0)))
 
 
+def _unregister_settings_callback():
+    global MSA_CALLBACK_REGISTERED
+    if not MSA_CALLBACK_REGISTERED or MSA_API is None:
+        return True
+    try:
+        MSA_API.onSettingsChanged -= _on_settings_changed
+    except ValueError:
+        LOGGER.debug('ModsSettingsAPI callback was already unregistered')
+    except Exception:
+        LOGGER.exception('Unable to unregister ModsSettingsAPI callback')
+        return False
+    MSA_CALLBACK_REGISTERED = False
+    return True
+
+
 def _set_mods_settings_template(g_mods_settings_api, template):
     try:
         g_mods_settings_api.setModTemplate(MOD_LINKAGE_ID, template, _on_settings_changed)
-        return
+        return True
     except TypeError:
         try:
             g_mods_settings_api.setModTemplate(MOD_LINKAGE_ID, template, _on_settings_changed, None)
-            return
+            return True
         except TypeError:
             g_mods_settings_api.setModTemplate(MOD_LINKAGE_ID, template)
+            return False
 
 
 def _register_settings():
-    global SETTINGS_REGISTERED, MSA_API, MSA_SETTINGS
+    global SETTINGS_REGISTERED, MSA_API, MSA_SETTINGS, MSA_CALLBACK_REGISTERED
     if SETTINGS_REGISTERED:
         return
     state = SETTINGS_REGISTRATION_STATE
@@ -2664,8 +2803,9 @@ def _register_settings():
          'enabled': bool(CONFIG.get('enabled', True)),
          'column1': column1,
          'column2': column2}
-        # ModsSettingsAPI auto-deregisters callback on mod unload; no manual deregister needed
-        _set_mods_settings_template(g_mods_settings_api, template)
+        # MSA owns this callback and removes it on module unload. Keep it active
+        # while disabled through MSA so the same control can re-enable HCC.
+        MSA_CALLBACK_REGISTERED = _set_mods_settings_template(g_mods_settings_api, template)
         MSA_API = g_mods_settings_api
         saved_settings = g_mods_settings_api.getModSettings(MOD_LINKAGE_ID, template)
         if isinstance(saved_settings, dict):
@@ -2695,32 +2835,14 @@ def _on_settings_changed(linkage, settings):
         CONFIG.clear()
         CONFIG.update(current_config)
         
-        # If mod was disabled, clean up and exit early
-        if was_enabled and not is_enabled:
-            _save_config()
-            fini()
-            CONFIG = current_config
-            LOGGER.info('Hangar Carousel Classic disabled via MSA')
+        # The existing GameFace model cannot gain or lose properties in place.
+        # Keep its bridge attached until real unload; switch its live values here.
+        if not is_enabled:
+            if was_enabled:
+                _save_config()
+                _show_native_carousel()
+                LOGGER.info('Hangar Carousel Classic disabled via MSA')
             return
-        
-        # If mod was enabled, reinitialize patches
-        if not was_enabled and is_enabled:
-            try:
-                _patch_vehicle_filter_model()
-                _patch_vehicle_filters_provider()
-                _patch_vehicle_tooltip()
-                _patch_vehicle_statistics_presenter()
-                _patch_legacy_playlist_cleanup()
-                _bind_hangar_space_events()
-                _bind_items_cache_sync()
-                _bind_dossiers_resync()
-                g_playerEvents.onAvatarReady += _track_last_played
-                if hasattr(g_playerEvents, 'onAccountBecomePlayer'):
-                    g_playerEvents.onAccountBecomePlayer += _on_account_become_player
-                LOGGER.info('Hangar Carousel Classic re-enabled via MSA')
-            except Exception:
-                LOGGER.exception('Unable to re-enable Hangar Carousel Classic')
-                return
         
         card_stats = CONFIG.setdefault('cardStats', {})
         if card_stats is not None:
@@ -2771,6 +2893,12 @@ def _on_settings_changed(linkage, settings):
         
         _save_config()
         _set_carousel_rows(int(settings.get('carouselRows', 0)), refresh=False)
+        if not was_enabled:
+            if _is_hangar_context_active():
+                for provider in list(FILTER_PROVIDERS):
+                    _reapply_provider_carousel_state(provider)
+                _refresh_statistics_presenters()
+            LOGGER.info('Hangar Carousel Classic re-enabled via MSA')
         _refresh_models_lightweight('MSA settings changed')
 
     except Exception:
@@ -2787,21 +2915,19 @@ try:
 except Exception:
     LOGGER.exception('Hangar Carousel Classic services failed to initialize')
 
-if CONFIG.get('enabled', True):
-    try:
-        _patch_carousel_filter_compat()
-        _patch_vehicle_filter_model()
-        _patch_vehicle_filters_provider()
-        _patch_vehicle_tooltip()
-        _patch_vehicle_statistics_presenter()
-        _patch_legacy_playlist_cleanup()
-        _bind_hangar_space_events()
-        _bind_items_cache_sync()
-        _bind_dossiers_resync()
-        g_playerEvents.onAvatarReady += _track_last_played
-        if hasattr(g_playerEvents, 'onAccountBecomePlayer'):
-            g_playerEvents.onAccountBecomePlayer += _on_account_become_player
-        _register_callback(1.0, _check_native_client_compatibility)
-        LOGGER.info('Hangar Carousel Classic %s loaded', MOD_VERSION)
-    except Exception:
-        LOGGER.exception('Hangar Carousel Classic failed to initialize')
+try:
+    _patch_vehicle_filter_model()
+    _patch_vehicle_filters_provider()
+    _patch_vehicle_tooltip()
+    _patch_vehicle_statistics_presenter()
+    _patch_legacy_playlist_cleanup()
+    _bind_hangar_space_events()
+    _bind_items_cache_sync()
+    _bind_dossiers_resync()
+    g_playerEvents.onAvatarReady += _track_last_played
+    if hasattr(g_playerEvents, 'onAccountBecomePlayer'):
+        g_playerEvents.onAccountBecomePlayer += _on_account_become_player
+    _register_callback(1.0, _check_native_client_compatibility)
+    LOGGER.info('Hangar Carousel Classic %s loaded', MOD_VERSION)
+except Exception:
+    LOGGER.exception('Hangar Carousel Classic failed to initialize')

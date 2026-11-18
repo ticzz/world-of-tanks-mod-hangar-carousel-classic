@@ -79,8 +79,16 @@ let state = { stats: {}, statsConfig: {}, filtering: {}, sorting: {}, actionCard
 let lastStateJson = "";
 let lastActiveFiltersJson = "";
 let lastStatsDiagnostic = "";
-let scheduled = false;
+let renderFrameId = null;
 let tooltipElement = null;
+let observer = null;
+let syncIntervalId = null;
+let renderIntervalId = null;
+let engineApi = null;
+let engineListenerBound = false;
+let started = false;
+let ready = false;
+let disposed = false;
 
 function setButtonGlyph(element, glyph, className) {
   while (element.firstChild) {
@@ -140,10 +148,10 @@ function callCommand(commandName, payload) {
 }
 
 function scheduleRender() {
-  if (scheduled) return;
-  scheduled = true;
-  requestAnimationFrame(() => {
-    scheduled = false;
+  if (!started || renderFrameId !== null) return;
+  renderFrameId = window.requestAnimationFrame(() => {
+    renderFrameId = null;
+    if (!started) return;
     if (state.hangarActive === false) {
       clearGlobalDecorations();
       return;
@@ -594,19 +602,75 @@ function syncModel() {
   scheduleRender();
 }
 
-engine.whenReady.then(() => {
-  const observer = new MutationObserver(scheduleRender);
+function start() {
+  if (!ready || started || disposed || !document.body) return;
+  started = true;
+  observer = new MutationObserver(scheduleRender);
   observer.observe(document.body, {
     childList: true,
     subtree: true,
     attributes: true,
     attributeFilter: ["data-test-id"]
   });
-  window.engine.on("subViews.onAdded", syncModel);
+  engineApi = window.engine;
+  engineApi.on("subViews.onAdded", syncModel);
+  engineListenerBound = true;
   // Sync model every 1 second (matches Python refresh rate)
-  window.setInterval(syncModel, 1000);
+  syncIntervalId = window.setInterval(syncModel, 1000);
   // Vehicle cards can be mounted after the model state stops changing.
-  window.setInterval(scheduleRender, 1000);
+  renderIntervalId = window.setInterval(scheduleRender, 1000);
   syncModel();
   scheduleRender();
+}
+
+function stop() {
+  if (!started) return;
+  started = false;
+  if (observer) {
+    observer.disconnect();
+    observer = null;
+  }
+  if (syncIntervalId !== null) {
+    window.clearInterval(syncIntervalId);
+    syncIntervalId = null;
+  }
+  if (renderIntervalId !== null) {
+    window.clearInterval(renderIntervalId);
+    renderIntervalId = null;
+  }
+  if (renderFrameId !== null) {
+    window.cancelAnimationFrame(renderFrameId);
+    renderFrameId = null;
+  }
+  hideTooltip();
+  clearGlobalDecorations();
+  if (engineListenerBound) {
+    engineApi.off("subViews.onAdded", syncModel);
+    engineListenerBound = false;
+  }
+  engineApi = null;
+}
+
+function dispose() {
+  if (disposed) return;
+  disposed = true;
+  stop();
+  window.removeEventListener("pagehide", stop);
+  window.removeEventListener("pageshow", start);
+  if (window.__hccCarouselClassicLifecycle === lifecycle) {
+    delete window.__hccCarouselClassicLifecycle;
+  }
+}
+
+const lifecycle = { dispose };
+const previousLifecycle = window.__hccCarouselClassicLifecycle;
+if (previousLifecycle && typeof previousLifecycle.dispose === "function") {
+  previousLifecycle.dispose();
+}
+window.__hccCarouselClassicLifecycle = lifecycle;
+window.addEventListener("pagehide", stop);
+window.addEventListener("pageshow", start);
+engine.whenReady.then(() => {
+  ready = true;
+  start();
 });

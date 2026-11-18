@@ -4,8 +4,11 @@ from __future__ import absolute_import, division
 import ast
 import json
 import os
+import shutil
+import tempfile
 import time
 import unittest
+from collections import OrderedDict
 
 
 class Logger(object):
@@ -43,12 +46,23 @@ class InventoryLifecycleTests(unittest.TestCase):
                               'client', 'gui', 'mods', 'mod_hangar_carousel_classic.py')
         with open(source, 'rb') as stream:
             tree = ast.parse(stream.read(), source)
-        names = ('_inventory_vehicles', '_build_payload', '_publish_payload',
-                 '_patch_vehicle_statistics_presenter', '_add_safe_provider',
+        self.source = source
+        self.tree = tree
+        names = ('fini', '_inventory_vehicles', '_build_payload', '_publish_payload',
+                 '_patch_vehicle_statistics_presenter', '_patch_vehicle_filters_provider',
+                 '_add_safe_provider',
+                 '_install_native_patch', '_install_native_mapping_patch',
+                 '_restore_native_patches', '_refresh_models_lightweight',
+                 '_migrate_legacy_runtime_if_needed',
                  '_has_tracked_carousel_provider',
                  '_is_allowed_hangar_path', '_is_hangar_context_active',
+                 '_bind_hangar_space_events', '_unbind_hangar_space_events',
+                 '_on_hangar_space_event', '_on_settings_changed',
+                 '_unregister_settings_callback',
                  '_normalized_card_stats_config', '_refresh_all_models',
                  '_native_provider_method', '_refresh_native_provider',
+                 '_show_native_carousel', '_reapply_provider_carousel_state',
+                 '_set_mods_settings_template',
                  '_refresh_native_vehicle_model', '_refresh_statistics_presenters',
                  '_set_filter_state', '_build_lightweight_payload', '_build_sort_json',
                  '_sync_sort_property', '_on_items_cache_sync_completed',
@@ -67,18 +81,24 @@ class InventoryLifecycleTests(unittest.TestCase):
         self.model = Model()
         self.callbacks = []
         self.ns = {
-            'LOGGER': self.logger, 'json': json,
+            'LOGGER': self.logger, 'json': json, 'os': os,
+            'OrderedDict': OrderedDict,
             'STATISTICS_PRESENTERS': [], 'INVENTORY_WAIT_STATE': None,
             'LAST_PAYLOAD': None, 'LAST_PAYLOAD_SIGNATURE': None,
             'LAST_DATA_SUMMARY': None, 'MOD_VERSION': 'test',
             'CONFIG': {'cardStats': {'enabled': False}},
             'RUNTIME_STATE': {}, 'ACTIVE_FILTERS': set(),
+            'MOD_LINKAGE_ID': 'hangar.carousel.classic',
+            'MSA_SETTINGS': {}, 'MSA_SYNCING': False,
             'DOSSIER_CACHE_GENERATION': 0, 'FILTER_ORDER': [],
             'DOSSIER_CACHE': {}, 'MARKS_INCOMPLETE_CACHE': {},
             'ALPHA_DAMAGE_CACHE': {}, 'ALPHA_DAMAGE_STATS': {'hits': 0, 'computed': 0},
             'ITEMS_INVALIDATION_CONTEXT': {'result': None, 'full': True},
             'dependency': None, 'IHangarSpace': None,
             'HANGAR_GUARD_STATE': {'active': None, 'spacePath': None},
+            'HANGAR_SPACE_INSTANCE': None, 'HANGAR_SPACE_EVENTS_BOUND': [],
+            'PATCHED_ATTRIBUTES': [], 'PATCHED_MAPPING_VALUES': [],
+            '_PATCH_MISSING': object(),
             'ALLOWED_HANGAR_PREFIXES': ('spaces/hangar_v4', 'spaces/h33_comp7'),
             'time': time,
             '_register_callback': lambda delay, callback: self.callbacks.append(callback),
@@ -115,6 +135,47 @@ class InventoryLifecycleTests(unittest.TestCase):
         presenter = type('Presenter', (), {'_vehiclesComponent': component})()
         self.ns['STATISTICS_PRESENTERS'].append(presenter)
         return presenter
+
+    def test_legacy_runtime_migration_saves_after_save_function_is_defined(self):
+        save_index = next(index for index, node in enumerate(self.tree.body)
+                          if isinstance(node, ast.FunctionDef)
+                          and node.name == '_save_runtime')
+        migration_index = next(index for index, node in enumerate(self.tree.body)
+                               if isinstance(node, ast.Expr)
+                               and isinstance(node.value, ast.Call)
+                               and isinstance(node.value.func, ast.Name)
+                               and node.value.func.id == '_migrate_legacy_runtime_if_needed')
+        self.assertLess(save_index, migration_index)
+
+        directory = tempfile.mkdtemp()
+        try:
+            runtime_path = os.path.join(directory, 'preferences', 'runtime.json')
+            legacy_path = os.path.join(directory, 'mods', 'configs',
+                                       'hangar_carousel_classic', 'runtime.json')
+            legacy_directory = os.path.dirname(legacy_path)
+            os.makedirs(legacy_directory)
+            with open(legacy_path, 'wb') as stream:
+                stream.write('{}')
+            self.ns['RUNTIME_PATH'] = runtime_path
+            self.ns['LEGACY_RUNTIME_PATH'] = legacy_path
+            saved = []
+
+            def save_runtime():
+                saved.append(runtime_path)
+                target_directory = os.path.dirname(runtime_path)
+                if not os.path.isdir(target_directory):
+                    os.makedirs(target_directory)
+                with open(runtime_path, 'wb') as stream:
+                    stream.write('{}')
+
+            self.ns['_save_runtime'] = save_runtime
+            self.ns['_migrate_legacy_runtime_if_needed']()
+
+            self.assertEqual(saved, [runtime_path])
+            self.assertTrue(os.path.isfile(legacy_path))
+            self.assertTrue(os.path.isfile(runtime_path))
+        finally:
+            shutil.rmtree(directory)
 
     def test_wait_preserves_state_and_cache_without_warning_spam(self):
         previous = {'totalVehicles': 3}
@@ -175,6 +236,306 @@ class InventoryLifecycleTests(unittest.TestCase):
         self.ns['IHangarSpace'] = object()
 
         self.assertFalse(self.ns['_is_hangar_context_active']())
+
+    def test_hangar_space_handlers_are_unbound(self):
+        class Event(object):
+            def __init__(self):
+                self.handlers = []
+
+            def __iadd__(self, handler):
+                self.handlers.append(handler)
+                return self
+
+            def __isub__(self, handler):
+                self.handlers.remove(handler)
+                return self
+
+        space = type('HangarSpace', (), {
+            'onSpaceCreate': Event(),
+            'onSpaceChanged': Event(),
+            'onSpaceDestroy': Event()})()
+        self.ns['dependency'] = type('Dependency', (), {
+            'instance': lambda self, interface: space})()
+        self.ns['IHangarSpace'] = object()
+
+        self.ns['_bind_hangar_space_events']()
+        self.assertEqual(len(self.ns['HANGAR_SPACE_EVENTS_BOUND']), 3)
+        self.assertTrue(all(getattr(space, event_name).handlers
+                            for event_name in self.ns['HANGAR_SPACE_EVENTS_BOUND']))
+
+        self.ns['_unbind_hangar_space_events']()
+        self.assertEqual(self.ns['HANGAR_SPACE_EVENTS_BOUND'], [])
+        self.assertIsNone(self.ns['HANGAR_SPACE_INSTANCE'])
+        self.assertFalse(self.ns['HANGAR_GUARD_STATE']['bound'])
+        self.assertTrue(all(not getattr(space, event_name).handlers
+                            for event_name in ('onSpaceCreate', 'onSpaceChanged',
+                                               'onSpaceDestroy')))
+
+    def test_settings_callback_is_unregistered_on_module_unload(self):
+        callback = self.ns['_on_settings_changed']
+
+        class Event(object):
+            def __init__(self):
+                self.handlers = [callback]
+
+            def __isub__(self, handler):
+                self.handlers.remove(handler)
+                return self
+
+        event = Event()
+        self.ns['MSA_API'] = type('MSA', (), {'onSettingsChanged': event})()
+        self.ns['MSA_CALLBACK_REGISTERED'] = True
+        self.ns['_on_settings_changed'] = callback
+
+        self.assertTrue(self.ns['_unregister_settings_callback']())
+        self.assertEqual(event.handlers, [])
+        self.assertFalse(self.ns['MSA_CALLBACK_REGISTERED'])
+
+    def test_fini_unsubscribes_settings_callback_unless_preserved(self):
+        callback = self.ns['_on_settings_changed']
+
+        class Event(object):
+            def __init__(self, handlers=None):
+                self.handlers = list(handlers or [])
+
+            def __isub__(self, handler):
+                self.handlers.remove(handler)
+                return self
+
+        def prepare_fini():
+            settings_event = Event([callback])
+            self.ns.update({
+                'SETTINGS_REGISTERED': True,
+                'MSA_CALLBACK_REGISTERED': True,
+                'MSA_API': type('MSA', (), {
+                    'onSettingsChanged': settings_event})(),
+                'MSA_SETTINGS': {'enabled': True},
+                'MSA_SYNCING': False,
+                'g_playerEvents': type('PlayerEvents', (), {
+                    'onAvatarReady': Event(),
+                    'onAccountBecomePlayer': Event()})(),
+                '_track_last_played': lambda: None,
+                '_on_account_become_player': lambda: None,
+                '_unbind_dossiers_resync': lambda: None,
+                '_unbind_items_cache_sync': lambda: None,
+                '_unbind_hangar_space_events': lambda: None,
+                '_save_persistent_alpha_cache': lambda: None,
+                '_restore_native_patches': lambda: None,
+                'CALLBACK_IDS': [],
+                'MODELS': [],
+                'FILTER_PROVIDERS': [],
+                'STATISTICS_PRESENTERS': [],
+                'INVENTORY_WAIT_STATE': None,
+                'FINAL_VISIBLE_VEHICLE_COUNT': 1,
+                'DOSSIER_CACHE': {},
+                'MARKS_INCOMPLETE_CACHE': {},
+                'ALPHA_DAMAGE_CACHE': {},
+                'PERSISTENT_ALPHA_STATE': {},
+                'ITEMS_INVALIDATION_CONTEXT': {},
+                'DOSSIER_CACHE_GENERATION': 0,
+                'LAST_DATA_SUMMARY': {},
+                'LAST_PAYLOAD': {},
+                'LAST_PAYLOAD_SIGNATURE': (),
+                'TOOLTIP_PAYLOAD_LOGGED': True,
+                'LEGACY_PLAYLISTS_REMOVED': True,
+                'CONFIG': {'enabled': True},
+                'RUNTIME_STATE': {'value': True},
+                'ACTIVE_FILTERS': set(['not_ready']),
+                'PATCHED_ATTRIBUTES': [],
+                'PATCHED_MAPPING_VALUES': []
+            })
+            return settings_event
+
+        event = prepare_fini()
+        self.ns['fini']()
+        self.assertEqual(event.handlers, [])
+        self.assertIsNone(self.ns['MSA_API'])
+        self.assertFalse(self.ns['MSA_CALLBACK_REGISTERED'])
+
+        event = prepare_fini()
+        self.ns['fini'](preserve_settings_callback=True)
+        self.assertEqual(event.handlers, [callback])
+        self.assertTrue(self.ns['MSA_CALLBACK_REGISTERED'])
+
+    def test_settings_toggle_updates_the_same_carousel_without_teardown(self):
+        calls = []
+
+        class FilterModel(object):
+            def transaction(self):
+                return self
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def setHccCarouselAuto(self, enabled):
+                self.auto = enabled
+
+            def setHccSortJson(self, value):
+                self.sort = value
+
+        class Provider(object):
+            def __init__(self):
+                self.viewModel = FilterModel()
+                self._VehicleFiltersDataProvider__rowCount = 4
+
+            def _VehicleFiltersDataProvider__updateCarousel(self):
+                self.rows = self._VehicleFiltersDataProvider__rowCount or 1
+
+        provider = Provider()
+        self.ns['FILTER_PROVIDERS'].append(provider)
+
+        def reapply_rows(target, rows, force=False):
+            self.assertIs(target, provider)
+            target._VehicleFiltersDataProvider__rowCount = rows
+            target._VehicleFiltersDataProvider__updateCarousel()
+            return True
+
+        provider.viewModel.auto = True
+        provider.viewModel.sort = '{"filtered":true}'
+        self.ns['CONFIG']['enabled'] = True
+        self.ns['ACTIVE_FILTERS'].add('more_credits')
+        self.ns.update({
+            '_save_config': lambda: calls.append(self.ns['CONFIG']['enabled']),
+            'fini': lambda **kwargs: self.fail('UI toggle must not unload the bridge'),
+            'MSA_CALLBACK_REGISTERED': True,
+            '_refresh_statistics_presenters': lambda: None,
+            '_apply_msa_filter_settings': lambda settings: None,
+            '_set_sorting_criteria': lambda criteria: None,
+            '_set_nations_order': lambda nations: None,
+            '_set_types_order': lambda types: None,
+            '_set_carousel_rows': lambda rows, refresh: None,
+            '_sync_provider_row_count': reapply_rows,
+            '_carousel_auto': lambda: True,
+            '_effective_carousel_rows': lambda: 4,
+            '_build_sort_json': lambda: '{"filtered":true}',
+            '_build_lightweight_payload': lambda: {'enabled': True, 'hangarActive': True},
+        })
+        toggle = self.ns['_on_settings_changed']
+        linkage = self.ns['MOD_LINKAGE_ID']
+
+        toggle(linkage, {'enabled': False})
+        self.assertFalse(json.loads(self.model.state)['hangarActive'])
+        self.assertEqual((provider.rows, provider.viewModel.auto, provider.viewModel.sort),
+                         (1, False, '{}'))
+
+        toggle(linkage, {'enabled': True})
+        self.assertTrue(json.loads(self.model.state)['hangarActive'])
+        self.assertEqual((provider.rows, provider.viewModel.auto, provider.viewModel.sort),
+                         (4, True, '{"filtered":true}'))
+        self.assertEqual(calls, [False, True])
+        self.assertEqual(self.ns['ACTIVE_FILTERS'], {'more_credits'})
+        self.assertTrue(self.ns['MSA_CALLBACK_REGISTERED'])
+
+    def test_settings_template_reports_optional_callback_support(self):
+        callback = lambda linkage, settings: None
+        self.ns['MOD_LINKAGE_ID'] = 'hangar.carousel.classic'
+        self.ns['_on_settings_changed'] = callback
+        registered_calls = []
+
+        class CallbackApi(object):
+            def setModTemplate(self, *args):
+                registered_calls.append(args)
+
+        class LegacyApi(object):
+            def setModTemplate(self, linkage, template):
+                return None
+
+        self.assertTrue(self.ns['_set_mods_settings_template'](CallbackApi(), {}))
+        self.assertEqual(registered_calls[0][2], callback)
+        self.assertFalse(self.ns['_set_mods_settings_template'](LegacyApi(), {}))
+
+    def test_items_cache_invalidation_hook_is_restored(self):
+        class Items(object):
+            def invalidateCache(self, diff=None):
+                return diff
+
+        items = Items()
+        original = Items.__dict__['invalidateCache']
+        self.ns['_patch_items_invalidation'](items)
+        self.assertIsNot(Items.__dict__['invalidateCache'], original)
+        self.assertTrue(Items._hcc_invalidation_patched)
+
+        self.ns['_restore_native_patches']()
+
+        self.assertIs(Items.__dict__['invalidateCache'], original)
+        self.assertFalse(hasattr(Items, '_hcc_invalidation_patched'))
+
+    def test_native_mapping_patch_restores_preexisting_and_added_keys(self):
+        inherited_row_type = object()
+        mapping = {2: inherited_row_type, 3: 'existing'}
+        self.ns['_install_native_mapping_patch'](mapping, 3, inherited_row_type)
+        self.ns['_install_native_mapping_patch'](mapping, 4, inherited_row_type)
+
+        self.ns['_restore_native_patches']()
+
+        self.assertEqual(mapping, {2: inherited_row_type, 3: 'existing'})
+
+    def test_wrapped_provider_load_skips_retired_hcc_hooks_after_toggle(self):
+        calls = []
+
+        class FilterModel(object):
+            def transaction(self):
+                return self
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        def set_auto(self, enabled):
+            calls.append('hcc')
+
+        class Provider(object):
+            viewModel = FilterModel()
+
+            def _onLoading(self):
+                calls.append('native')
+                return 'loaded'
+
+            def _finalize(self):
+                return None
+
+            def _VehicleFiltersDataProvider__updateCarousel(self):
+                return None
+
+        self.ns.update({
+            'VehicleFiltersDataProvider': Provider,
+            'vehicle_filters_presenter_module': type('PresenterModule', (), {
+                '_CAROUSEL_ROW_COUNT_TYPE': {2: object()}}),
+            '_build_sort_json': lambda: None,
+            '_carousel_rows': lambda: 2,
+            '_provider_row_count': lambda provider: 2,
+        })
+        patch = self.ns['_patch_vehicle_filters_provider']
+        restore = self.ns['_restore_native_patches']
+        patch()
+        hcc_loading = Provider._onLoading
+
+        def other_mod_loading(self):
+            result = hcc_loading(self)
+            calls.append('other mod')
+            return result
+
+        Provider._onLoading = other_mod_loading
+        other_mod_hook = Provider.__dict__['_onLoading']
+        for _ in range(2):
+            FilterModel.setHccCarouselAuto = set_auto
+            self.assertEqual(Provider()._onLoading(), 'loaded')
+            self.assertEqual(calls.count('hcc'), 1)
+            restore()
+            del FilterModel.setHccCarouselAuto
+            self.assertIs(Provider.__dict__['_onLoading'], other_mod_hook)
+            self.ns['FILTER_PROVIDERS'][:] = []
+            calls[:] = []
+            self.assertEqual(Provider()._onLoading(), 'loaded')
+            self.assertEqual(calls, ['native', 'other mod'])
+            self.assertEqual(self.ns['FILTER_PROVIDERS'], [])
+            calls[:] = []
+            patch()
 
     def test_native_update_recovers_without_polling_and_finalize_waits_again(self):
         class Presenter(object):
