@@ -86,10 +86,11 @@ Supported criteria:
 
 ### Nation and Type Priority Layers
 
-Custom priority can be defined independent from numeric sorting:
+Custom priority can be defined independent from numeric sorting. Entered values
+sort first in the configured order; values not listed use the default order:
 
-- nations_order: tokens such as ussr, germany, usa, china, france, uk, japan, czech, poland, sweden, italy
-- types_order: tokens such as lightTank, mediumTank, heavyTank, AT-SPG, SPG
+- nations_order: ussr, germany, usa, china, france, uk, japan, czech, sweden, poland, italy
+- types_order: lightTank, mediumTank, heavyTank, AT-SPG, SPG
 
 Unknown or unmapped entries are sorted last.
 

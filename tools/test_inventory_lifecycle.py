@@ -64,12 +64,19 @@ class InventoryLifecycleTests(unittest.TestCase):
                  '_show_native_carousel', '_reapply_provider_carousel_state',
                  '_set_mods_settings_template',
                  '_refresh_native_vehicle_model', '_refresh_statistics_presenters',
+                 '_normalize_nation_token', '_normalized_nations_order',
+                 '_normalized_types_order', '_get_nation_index', '_get_type_index',
                  '_set_filter_state', '_build_lightweight_payload', '_build_sort_json',
                  '_sync_sort_property', '_on_items_cache_sync_completed',
                  '_invalidate_dossier_cache', '_patch_items_invalidation')
         nodes = [node for node in tree.body
                  if isinstance(node, ast.FunctionDef) and node.name in names]
-        self.assertEqual(len(nodes), len(names))
+        nodes.extend(node for node in tree.body
+                     if isinstance(node, ast.Assign) and any(
+                         isinstance(target, ast.Name) and target.id in
+                         ('DEFAULT_NATIONS_ORDER', 'DEFAULT_TYPES_ORDER')
+                         for target in node.targets))
+        self.assertEqual(len(nodes), len(names) + 2)
         model_class = next(node for node in tree.body
                            if isinstance(node, ast.ClassDef)
                            and node.name == 'HangarCarouselClassicModel')
@@ -86,7 +93,8 @@ class InventoryLifecycleTests(unittest.TestCase):
             'STATISTICS_PRESENTERS': [], 'INVENTORY_WAIT_STATE': None,
             'LAST_PAYLOAD': None, 'LAST_PAYLOAD_SIGNATURE': None,
             'LAST_DATA_SUMMARY': None, 'MOD_VERSION': 'test',
-            'CONFIG': {'cardStats': {'enabled': False}},
+            'CONFIG': {'cardStats': {'enabled': False},
+                       'sorting': {'nations_order': [], 'types_order': []}},
             'RUNTIME_STATE': {}, 'ACTIVE_FILTERS': set(),
             'MOD_LINKAGE_ID': 'hangar.carousel.classic',
             'MSA_SETTINGS': {}, 'MSA_SYNCING': False,
@@ -129,6 +137,37 @@ class InventoryLifecycleTests(unittest.TestCase):
             DOSSIER_RESYNC=5, STATS_RESYNC=6))
         self.ns['GUI_ITEM_TYPE'] = type('ItemTypes', (), {'VEHICLE': 1})
         self.model.refresh = lambda: self.ns['refresh_model'](self.model)
+
+    def test_empty_nation_and_type_orders_use_defaults(self):
+        vehicles = [
+            type('Vehicle', (), {'nationID': 1, 'type': 'heavyTank'})(),
+            type('Vehicle', (), {'nationID': 0, 'type': 'lightTank'})(),
+        ]
+
+        self.assertEqual(self.ns['_get_nation_index'](vehicles[0]), 1)
+        self.assertEqual(self.ns['_get_nation_index'](vehicles[1]), 0)
+        self.assertEqual(self.ns['_get_type_index'](vehicles[0]), 2)
+        self.assertEqual(self.ns['_get_type_index'](vehicles[1]), 0)
+
+    def test_custom_nation_and_type_orders_precede_default_remainder(self):
+        self.ns['CONFIG']['sorting'].update(
+            nations_order=['italy', 'ussr'], types_order=['SPG', 'lightTank'])
+        vehicles = [
+            type('Vehicle', (), {'nationID': 10, 'type': 'SPG'})(),
+            type('Vehicle', (), {'nationID': 0, 'type': 'lightTank'})(),
+            type('Vehicle', (), {'nationID': 1, 'type': 'mediumTank'})(),
+        ]
+
+        self.assertEqual(
+            [self.ns['_get_nation_index'](vehicle) for vehicle in vehicles],
+            [0, 1, 2])
+        self.assertEqual(
+            [self.ns['_get_type_index'](vehicle) for vehicle in vehicles],
+            [0, 1, 2])
+        self.assertEqual(self.ns['CONFIG']['sorting']['nations_order'],
+                         ['italy', 'ussr'])
+        self.assertEqual(self.ns['CONFIG']['sorting']['types_order'],
+                         ['SPG', 'lightTank'])
 
     def add_presenter(self, vehicles):
         component = type('Component', (), {'vehicles': vehicles})()

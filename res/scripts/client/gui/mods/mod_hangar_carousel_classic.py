@@ -50,7 +50,7 @@ try:
 except Exception:
     carousel_filter_module = None
 MOD_ID = 'mod_hangar_carousel_classic'
-MOD_VERSION = '1.0.27'
+MOD_VERSION = '1.0.28'
 MOD_LINKAGE_ID = 'mod_hangar.carousel.classic'
 PLAYLIST_ID_PREFIX = 'mhcc_'
 PREFERENCES_DIR = getPreferencesDirPath()
@@ -1558,6 +1558,11 @@ def _normalized_card_stats_config(raw_stats_config):
     return stats_config
 
 
+DEFAULT_NATIONS_ORDER = ('ussr', 'germany', 'usa', 'china', 'france', 'uk',
+                         'japan', 'czech', 'sweden', 'poland', 'italy')
+DEFAULT_TYPES_ORDER = ('lightTank', 'mediumTank', 'heavyTank', 'AT-SPG', 'SPG')
+
+
 def _normalize_nation_token(value):
     if value is None:
         return None
@@ -1585,6 +1590,21 @@ def _normalized_nations_order():
             continue
         normalized.append(token)
         seen.add(token)
+    normalized.extend(nation for nation in DEFAULT_NATIONS_ORDER if nation not in seen)
+    return normalized
+
+
+def _normalized_types_order():
+    raw_order = CONFIG.get('sorting', {}).get('types_order', [])
+    normalized = []
+    seen = set()
+    for vehicle_type in raw_order:
+        if not isinstance(vehicle_type, basestring) or vehicle_type in seen:
+            continue
+        normalized.append(vehicle_type)
+        seen.add(vehicle_type)
+    normalized.extend(vehicle_type for vehicle_type in DEFAULT_TYPES_ORDER
+                      if vehicle_type not in seen)
     return normalized
 
 
@@ -1617,7 +1637,7 @@ def _get_nation_index(vehicle):
 
 def _get_type_index(vehicle):
     """Return vehicle type index for sorting priority."""
-    types_order = CONFIG.get('sorting', {}).get('types_order', [])
+    types_order = _normalized_types_order()
     try:
         vtype = vehicle.type or ''
         if types_order and vtype in types_order:
@@ -2649,18 +2669,18 @@ SETTINGS_TEXT = {'en': {'display': u'Carousel and cards',
     'rowsTooltip': u'Choose the number of vehicle rows. Automatic mode adapts the row count to the number of matching vehicles.',
     'auto': u'Automatic',
     'sortingCriteria': u'Sort criteria',
-    'sortingCriteriaTooltip': u'Configure multiple sorting rules as a hierarchy. The first value is primary, followed by tie-breakers. HCC panel buttons set one rule at a time. Supported values: nation, type, level, maxBattleTier, premium, battles, winRate, markOfMastery, averageDamage, alphaDamage, marksOnGun, battlePassPoints, lastPlayed. Prefix a value with - to reverse its order (examples: -averageDamage, -alphaDamage).',
+    'sortingCriteriaTooltip': u'Configure multiple sorting rules as a hierarchy. The first value is primary, followed by tie-breakers. HCC panel buttons set one rule at a time. Nation and type criteria use the custom order below, followed by the default order for unlisted values. Supported values: nation, type, level, maxBattleTier, premium, battles, winRate, markOfMastery, averageDamage, alphaDamage, marksOnGun, battlePassPoints, lastPlayed. Prefix a value with - to reverse its order (examples: -averageDamage, -alphaDamage).',
     'nationsOrder': u'Nation order',
-    'nationsOrderTooltip': u'Comma-separated nation priority, for example: ussr, germany, usa, china, france, uk, japan, czech, poland, sweden, italy.',
+    'nationsOrderTooltip': u'Optional comma-separated nation priority. Entered nations are sorted first in this order; all others follow the default WoT order.',
     'typesOrder': u'Type order',
-    'typesOrderTooltip': u'Comma-separated vehicle type priority, for example: lightTank, mediumTank, heavyTank, AT-SPG, SPG.',
+    'typesOrderTooltip': u'Optional comma-separated vehicle type priority. Entered types are sorted first in this order; all others follow the default order.',
     'hideBuyTank': u'Hide "Buy vehicle" cell',
     'hideBuyTankTooltip': u'Hide the client cell used to buy a vehicle.',
     'hideBuySlot': u'Hide "Buy slot" cell',
     'hideBuySlotTooltip': u'Hide the client cell used to buy a garage slot.',
     'hideRestoreTank': u'Hide "Restore vehicle" cell',
     'hideRestoreTankTooltip': u'Hide the client cell used to restore a vehicle.',
-    'restart': u'Changes are applied immediately; restart the client after changing the master switch.'}}
+    'restart': u'Changes are applied immediately; no client restart required.'}}
 
 
 def _resolve_mods_settings_api():
