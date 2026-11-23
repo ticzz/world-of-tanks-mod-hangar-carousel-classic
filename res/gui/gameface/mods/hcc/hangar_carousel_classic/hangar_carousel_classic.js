@@ -24,7 +24,7 @@ const LABELS = {
     stat_win_rate: "WR",
     stat_damage: "Avg",
     stat_alpha_damage: "Alpha",
-    stat_mastery: "M",
+    stat_mastery: "MB",
     stat_marks: "MoE",
     carousel_rows: "Carousel rows",
     carousel_rows_description: "Number of vehicle rows displayed in the hangar carousel.",
@@ -202,7 +202,8 @@ function formatCompact(value) {
 function masteryLabel(value) {
   const mastery = Number(value || 0);
   if (mastery >= 4) return "ASS";
-  return `${labels().stat_mastery}${mastery}`;
+  const badgeClass = mastery === 1 ? 3 : mastery === 3 ? 1 : mastery;
+  return `${labels().stat_mastery} ${badgeClass}`;
 }
 
 function marksLevel(stats) {

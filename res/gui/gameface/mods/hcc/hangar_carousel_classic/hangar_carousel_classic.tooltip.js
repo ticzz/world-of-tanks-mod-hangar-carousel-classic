@@ -97,9 +97,10 @@ function HCCTooltipItems() {
   }
   if (fields.includes("mastery") && Number(stats.mastery) > 0) {
     const mastery = Number(stats.mastery);
+    const badgeClass = mastery === 1 ? 3 : mastery === 3 ? 1 : mastery;
     items.push({
       label: labels.tooltip_mastery,
-      value: mastery >= 4 ? "ASS" : `M${mastery}`,
+      value: mastery >= 4 ? "ASS" : `MB ${badgeClass}`,
       classes: ["mastery", `mastery-${mastery}`]
     });
   }

@@ -4,8 +4,8 @@ Classic-style hangar carousel for World of Tanks 2.x with native Gameface integr
 
 ## Quick Facts
 
-- Latest release: [v1.0.28](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/tag/v1.0.28)
-- Changes: [v1.0.28 release notes](docs/RELEASE_NOTES_1.0.28.md)
+- Latest release: [v1.0.29](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/tag/v1.0.29)
+- Changes: [v1.0.29 release notes](docs/RELEASE_NOTES_1.0.29.md)
 - Full release notes: [GitHub Releases](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases)
 - Mod ID: hangar.carousel.classic
 - Runtime: WoT embedded Python 2.7
@@ -70,7 +70,7 @@ The separate `dist/mod_hangar_carousel_classic_1.0.24-lifecycle-test.wotmod` con
 ## How to Install (using .wotmod only)
 
 - See the complete [installation guide](docs/INSTALLATION.md).
-- Download the [v1.0.28 release](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/tag/v1.0.28). Remove the older HCC WOTMOD from your mods folder before installing the new one.
+- Download the [v1.0.29 release](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/tag/v1.0.29). Remove the older HCC WOTMOD from your mods folder before installing the new one.
 - Copy the `.wotmod` file into your World of Tanks client's mods directory. 
 For instance, you might place it in a path like `G:/Games/World_of_Tanks_EU/mods/2.4.1.1/`.
 - The standalone WOTMOD requires `net.openwg.gameface_1.2.2.wotmod` or newer in the same client mods folder. The full package already includes GameFace 1.2.2.
@@ -81,28 +81,28 @@ For instance, you might place it in a path like `G:/Games/World_of_Tanks_EU/mods
 
 ## Full Package Installation
 
-- If you choose the complete package, [hangar_carousel_classic_1.0.28_full.zip](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.28/hangar_carousel_classic_1.0.28_full.zip) includes the carousel mod and GameFace 1.2.2 in `mods/2.4.1.1/`. Extract it directly into the World of Tanks installation directory. Aslain's Mod Menu and ModsSettingsBridge are intentionally omitted; get or update them separately via [Aslain's WoT ModPack](https://aslain.com/index.php?/topic/13-download-%E2%98%85-world-of-tanks-%E2%98%85-modpack/) if needed.
+- If you choose the complete package, [hangar_carousel_classic_1.0.29_full.zip](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.29/hangar_carousel_classic_1.0.29_full.zip) includes the carousel mod and GameFace 1.2.2 in `mods/2.4.1.1/`. Extract it directly into the World of Tanks installation directory. Aslain's Mod Menu and ModsSettingsBridge are intentionally omitted; get or update them separately via [Aslain's WoT ModPack](https://aslain.com/index.php?/topic/13-download-%E2%98%85-world-of-tanks-%E2%98%85-modpack/) if needed.
 
 ## Build Locally
 
 ```powershell
 ./tools/build.ps1
-./tools/validate.ps1 -PackagePath ./dist/mod_hangar_carousel_classic_1.0.28.wotmod
-./tools/install.ps1 -GameRoot G:/Games/World_of_Tanks_EU -PackagePath ./dist/mod_hangar_carousel_classic_1.0.28.wotmod
+./tools/validate.ps1 -PackagePath ./dist/mod_hangar_carousel_classic_1.0.29.wotmod
+./tools/install.ps1 -GameRoot G:/Games/World_of_Tanks_EU -PackagePath ./dist/mod_hangar_carousel_classic_1.0.29.wotmod
 ```
 
 ## Documentation
 
 - Detailed feature/config/build docs: [docs/TECHNICAL_DETAILS.md](docs/TECHNICAL_DETAILS.md)
-- Latest release details: [docs/RELEASE_NOTES_1.0.28.md](docs/RELEASE_NOTES_1.0.28.md)
+- Latest release details: [docs/RELEASE_NOTES_1.0.29.md](docs/RELEASE_NOTES_1.0.29.md)
 - Security summary: [EXECUTIVE_SUMMARY.md](EXECUTIVE_SUMMARY.md)
 - Security audit: [SECURITY_AUDIT_REPORT.md](SECURITY_AUDIT_REPORT.md)
 
 ## Quick Links
 
 - Releases overview: [GitHub Releases](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases)
-- Standalone package: [mod_hangar_carousel_classic_1.0.28.wotmod](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.28/mod_hangar_carousel_classic_1.0.28.wotmod)
-- Full package: [hangar_carousel_classic_1.0.28_full.zip](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.28/hangar_carousel_classic_1.0.28_full.zip)
+- Standalone package: [mod_hangar_carousel_classic_1.0.29.wotmod](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.29/mod_hangar_carousel_classic_1.0.29.wotmod)
+- Full package: [hangar_carousel_classic_1.0.29_full.zip](https://github.com/ticzz/world-of-tanks-mod-hangar-carousel-classic/releases/download/v1.0.29/hangar_carousel_classic_1.0.29_full.zip)
 - Full technical docs: [docs/TECHNICAL_DETAILS.md](docs/TECHNICAL_DETAILS.md)
 - Main mod source: [res/scripts/client/gui/mods/mod_hangar_carousel_classic.py](res/scripts/client/gui/mods/mod_hangar_carousel_classic.py)
 - Frontend assets: [res/gui/gameface/mods/hcc/hangar_carousel_classic](res/gui/gameface/mods/hcc/hangar_carousel_classic)

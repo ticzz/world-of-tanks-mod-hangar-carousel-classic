@@ -49,6 +49,25 @@ const context = vm.createContext({
 });
 vm.runInContext(fs.readFileSync(sourcePath, "utf8"), context);
 
+const tooltipPath = path.join(path.dirname(sourcePath), "hangar_carousel_classic.tooltip.js");
+const tooltipContext = vm.createContext({ engine: { whenReady: { then: () => {} } } });
+vm.runInContext(fs.readFileSync(tooltipPath, "utf8"), tooltipContext);
+for (const [value, expected] of [[1, "MB 3"], [2, "MB 2"], [3, "MB 1"], [4, "ASS"]]) {
+  const card = vm.runInContext(
+    `state.statsConfig = {fields: ["mastery"]}; statRows({mastery: ${value}})[0][0]`, context);
+  const tooltip = vm.runInContext(
+    `HCCTooltipState = {stats: {mastery: ${value}}, statsConfig: {fields: ["mastery"]}}; HCCTooltipItems()[0]`,
+    tooltipContext);
+  assert.equal(card.text, expected);
+  assert.equal(tooltip.value, expected);
+  assert.ok(card.classes.includes(`mastery-${value}`));
+  assert.ok(tooltip.classes.includes(`mastery-${value}`));
+}
+assert.equal(vm.runInContext('masteryLabel(0)', context), "MB 0");
+assert.equal(vm.runInContext(
+  'HCCTooltipState = {stats: {mastery: 0}, statsConfig: {fields: ["mastery"]}}; HCCTooltipItems().length',
+  tooltipContext), 0);
+
 const stats = {
   1: { battles: 10, alphaDamage: 240 },
   2: { battles: 0, alphaDamage: 320 }
