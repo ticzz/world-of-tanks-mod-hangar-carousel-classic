@@ -39,7 +39,7 @@ Configurable fields:
 - averageDamage
 - alphaDamage
 - mastery
-- Mastery labels follow the in-game classes: internal values 1, 2 and 3 display as MB 3, MB 2 and MB 1; 4 displays as ASS. The underlying values remain unchanged.
+- Mastery labels follow the in-game classes: internal values 1, 2 and 3 display as MB 3, MB 2 and MB 1; 4 displays as ACE. The underlying values remain unchanged.
 - marksOnGun
 
 Minimum battles threshold is configurable.

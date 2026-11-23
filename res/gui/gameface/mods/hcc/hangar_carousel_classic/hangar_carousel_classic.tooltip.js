@@ -100,7 +100,7 @@ function HCCTooltipItems() {
     const badgeClass = mastery === 1 ? 3 : mastery === 3 ? 1 : mastery;
     items.push({
       label: labels.tooltip_mastery,
-      value: mastery >= 4 ? "ASS" : `MB ${badgeClass}`,
+      value: mastery >= 4 ? "ACE" : `MB ${badgeClass}`,
       classes: ["mastery", `mastery-${mastery}`]
     });
   }

@@ -52,7 +52,7 @@ vm.runInContext(fs.readFileSync(sourcePath, "utf8"), context);
 const tooltipPath = path.join(path.dirname(sourcePath), "hangar_carousel_classic.tooltip.js");
 const tooltipContext = vm.createContext({ engine: { whenReady: { then: () => {} } } });
 vm.runInContext(fs.readFileSync(tooltipPath, "utf8"), tooltipContext);
-for (const [value, expected] of [[1, "MB 3"], [2, "MB 2"], [3, "MB 1"], [4, "ASS"]]) {
+for (const [value, expected] of [[1, "MB 3"], [2, "MB 2"], [3, "MB 1"], [4, "ACE"]]) {
   const card = vm.runInContext(
     `state.statsConfig = {fields: ["mastery"]}; statRows({mastery: ${value}})[0][0]`, context);
   const tooltip = vm.runInContext(

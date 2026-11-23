@@ -201,7 +201,7 @@ function formatCompact(value) {
 
 function masteryLabel(value) {
   const mastery = Number(value || 0);
-  if (mastery >= 4) return "ASS";
+  if (mastery >= 4) return "ACE";
   const badgeClass = mastery === 1 ? 3 : mastery === 3 ? 1 : mastery;
   return `${labels().stat_mastery} ${badgeClass}`;
 }
