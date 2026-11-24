@@ -45,8 +45,8 @@ try {
 finally {
     $sha.Dispose()
 }
-if ($sourceHash -ne '15B951A22F4008936B6B027B3D08366183831A27F60DA1F82FF10245C9F895DB') {
-    throw "Unsupported Frontline hangar bundle $sourceHash; expected the verified WoT 2.4.1.1 bundle."
+if ($sourceHash -notin @('15B951A22F4008936B6B027B3D08366183831A27F60DA1F82FF10245C9F895DB', '0833E7990A009DA612A57BCDE8AEDEA8F6ADD7AC0D15D2BA2DAFCF536B9FBEB7')) {
+    throw "Unsupported Frontline hangar bundle $sourceHash; expected the verified WoT 2.4.1.1 or 2.4.2.0 bundle."
 }
 
 $source = [Text.Encoding]::UTF8.GetString($sourceBytes)
@@ -109,6 +109,67 @@ $replacements = @(
     )
 )
 
+if ($sourceHash -eq '0833E7990A009DA612A57BCDE8AEDEA8F6ADD7AC0D15D2BA2DAFCF536B9FBEB7') {
+    # WoT 2.4.2.0 rebuilt this bundle: same patch points, other minified names
+    $replacements = @(
+        @(
+            'r={...e.primitives(["defaultFilters"])},',
+            'r={...e.primitives(["defaultFilters","hccSortJson"])},'
+        ),
+        @(
+            'o={...e.primitives(["carouselRowCount"]),filters:Da.box(n,{deep:!1}),searchName:Da.box(s?.[0]??""),nations:e.arrayClone("nationsOrder")};',
+            'o={...e.primitives(["carouselRowCount"]),hccSortJson:r.hccSortJson,filters:Da.box(n,{deep:!1}),searchName:Da.box(s?.[0]??""),nations:e.arrayClone("nationsOrder")};'
+        ),
+        @(
+            'h=Ia.shallow(()=>{const t=e.filters.model.computes.nationToIndex();return N(e.myVehicles.model.getAll(),(e,a)=>bn(t,jn,e,a))})',
+            'h=Ia.shallow(()=>{const nationIndex=e.filters.model.computes.nationToIndex(),hcc=(()=>{try{return JSON.parse(e.filters.model.hccSortJson.get()||"{}")}catch(e){return{}}})(),values=hcc.values||{},allowed=new Set((hcc.allowed||[]).map(e=>String(e)));return N(e.myVehicles.model.getAll().filter(e=>!hcc.filtered||allowed.has(String(e.id))||allowed.has(String(e.inventoryId))),(e,a)=>{const t=values[String(e.id)]||values[e.id]||values[String(e.inventoryId)]||values[e.inventoryId]||[],s=values[String(a.id)]||values[a.id]||values[String(a.inventoryId)]||values[a.inventoryId]||[];for(let e=0;e<Math.max(t.length,s.length);e++){const a=Number(t[e]??0),n=Number(s[e]??0);if(a!==n)return a<n?-1:1}return bn(nationIndex,jn,e,a)})})'
+        ),
+        @(
+            'v=Ia.shallow(()=>{const t=i.filters.get(),a=h(),s=i.searchName.get();return a.filter(a=>!!gn(s,a)&&hn(t,a,e.statistic.model.get(a.id)))})',
+            'v=Ia.shallow(()=>{const t=i.filters.get(),a=h(),s=i.searchName.get(),hcc=(()=>{try{return JSON.parse(e.filters.model.hccSortJson.get()||"{}")}catch(e){return{}}})(),allowed=new Set((hcc.allowed||[]).map(e=>String(e)));return a.filter(a=>!!gn(s,a)&&hn(t,a,e.statistic.model.get(a.id))&&(!hcc.filtered||allowed.has(String(a.id))||allowed.has(String(a.inventoryId))))})'
+        ),
+        @(
+            'm=Ia.primitive(()=>{const t=[...c.getAll()],a=e.requires.filters.model.computes.nationToIndex();return t.sort((e,t)=>bn(a,jn,e,t)),t});',
+            'm=Ia.primitive(()=>{const t=[...c.getAll()],nationIndex=e.requires.filters.model.computes.nationToIndex(),hcc=(()=>{try{return JSON.parse(e.requires.filters.model.hccSortJson.get()||"{}")}catch(e){console.error("[HangarCarouselClassic] Invalid Frontline filter/sort payload",e);return{}}})(),values=hcc.values||{},allowed=new Set((hcc.allowed||[]).map(e=>String(e)));return hcc.filtered&&t.splice(0,t.length,...t.filter(e=>allowed.has(String(e.id))||allowed.has(String(e.inventoryId)))),t.sort((e,t)=>{const a=values[String(e.id)]||values[e.id]||values[String(e.inventoryId)]||values[e.inventoryId]||[],s=values[String(t.id)]||values[t.id]||values[String(t.inventoryId)]||values[t.inventoryId]||[];for(let e=0;e<Math.max(a.length,s.length);e++){const t=Number(a[e]??0),n=Number(s[e]??0);if(t!==n)return t<n?-1:1}return bn(nationIndex,jn,e,t)}),t});'
+        ),
+        @(
+            'i=(n?l(n.list):m()).filter(a=>!1!==r.has(a.id)&&(!!hn(t,a,e.requires.statistic.model.get(a.id))&&gn(s,a)));os(()=>a.set(i))',
+            'i=(n?l(n.list):m()).filter(a=>!1!==r.has(a.id)&&(!!hn(t,a,e.requires.statistic.model.get(a.id))&&gn(s,a)));const hcc=(()=>{try{return JSON.parse(e.requires.filters.model.hccSortJson.get()||"{}")}catch(e){console.error("[HangarCarouselClassic] Invalid Frontline filter/sort payload",e);return{}}})(),hccValues=hcc.values||{},hccAllowed=new Set((hcc.allowed||[]).map(e=>String(e)));hcc.filtered&&i.splice(0,i.length,...i.filter(e=>hccAllowed.has(String(e.id))||hccAllowed.has(String(e.inventoryId)))),i.sort((e,t)=>{const a=hccValues[String(e.id)]||hccValues[e.id]||hccValues[String(e.inventoryId)]||hccValues[e.inventoryId]||[],s=hccValues[String(t.id)]||hccValues[t.id]||hccValues[String(t.inventoryId)]||hccValues[t.inventoryId]||[];for(let e=0;e<Math.max(a.length,s.length);e++){const t=Number(a[e]??0),n=Number(s[e]??0);if(t!==n)return t<n?-1:1}return 0}),os(()=>a.set(i))'
+        ),
+        @(
+            '2===e?t.double:t.single',
+            '1<e?t.double:t.single'
+        ),
+        @(
+            '2!==t?{visibleSlots:Math.ceil(s/a),cardWidth:a,carouselRows:t}:{visibleSlots:Math.ceil(s/a*t),cardWidth:a,carouselRows:t}',
+            '1===t?{visibleSlots:Math.ceil(s/a),cardWidth:a,carouselRows:t}:{visibleSlots:Math.ceil(s/a*t),cardWidth:a,carouselRows:t}'
+        ),
+        @(
+            'for(let a=0;a<e.length;a+=2)t.push(e.slice(a,a+2));return 1===t.at(-1)?.length&&t.at(-1)?.push(Z_),t},[e])}(b)',
+            'for(let a=0;a<e.length;a+=h)t.push(e.slice(a,a+h));const n=t.at(-1);if(n)for(;n.length<h;)n.push(Z_);return t},[e,h])}(b)'
+        ),
+        @(
+            'const r=2===s;function o(s)',
+            'const r=1<s;function o(s)'
+        ),
+        @(
+            'totalElements:2===h?x.length:b.length',
+            'totalElements:1<h?x.length:b.length'
+        ),
+        @(
+            'return 2===h?(0,nr.jsx)(he,',
+            'return 1<h?(0,nr.jsx)(he,'
+        ),
+        @(
+            'classNames:{base:cs(xh,y&&yh),element:cs(Ch,t&&jh)}',
+            'classNames:{base:cs(xh,y&&yh,3===h&&"hcc-native-carousel--3",4===h&&"hcc-native-carousel--4"),element:cs(Ch,t&&jh)}'
+        ),
+        @(
+            'className:cs(jR,2===s&&wR)',
+            'className:cs(jR,2===s&&wR,3===s&&"hcc-native-carousel-page--3",4===s&&"hcc-native-carousel-page--4")'
+        )
+    )
+}
 foreach ($replacement in $replacements) {
     $from = $replacement[0]
     $to = $replacement[1]

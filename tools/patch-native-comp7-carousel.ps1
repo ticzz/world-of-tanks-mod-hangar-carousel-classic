@@ -16,7 +16,8 @@ $profiles = @(
         EntryPath = 'comp7/gui/gameface/_dist/production/mono/lobby/hangar/bundle.js'
         SupportedHashes = @(
             '20BF8862B0B5DFDEB79CCFF666725FF76F731E855F0A4D2BFD9C28A19759B172',
-            '0CF0AD68AB8A463E6CEF566132090760CC4EF4FD35038AA3982611FFAD67A34C'
+            '0CF0AD68AB8A463E6CEF566132090760CC4EF4FD35038AA3982611FFAD67A34C',
+            'AF40DF4FB93BF1FDA1E44EA981DDC0B02AD27504103699A110F3EBE608B2C7AC'
         )
     },
     @{
@@ -146,6 +147,43 @@ else {
     )
 }
 
+if ($sourceHash -eq 'AF40DF4FB93BF1FDA1E44EA981DDC0B02AD27504103699A110F3EBE608B2C7AC') {
+    # WoT 2.4.2.0 rebuilt this bundle: same patch points, other minified names
+    $replacements = @(
+        @(
+            '2===e?t.double:t.single',
+            '1<e?t.double:t.single'
+        ),
+        @(
+            '2!==t?{visibleSlots:Math.ceil(s/a),cardWidth:a,carouselRows:t}:{visibleSlots:Math.ceil(s/a*t),cardWidth:a,carouselRows:t}',
+            '1===t?{visibleSlots:Math.ceil(s/a),cardWidth:a,carouselRows:t}:{visibleSlots:Math.ceil(s/a*t),cardWidth:a,carouselRows:t}'
+        ),
+        @(
+            'v=function(e){return(0,cr.useMemo)(()=>{const t=[];for(let a=0;a<e.length;a+=2)t.push(e.slice(a,a+2));return 1===t.at(-1)?.length&&t.at(-1)?.push(eg),t},[e])}(b);',
+            'v=function(e){return(0,cr.useMemo)(()=>{const t=[];for(let a=0;a<e.length;a+=_)t.push(e.slice(a,a+_));const n=t.at(-1);if(n)for(;n.length<_;)n.push(eg);return t},[e,_])}(b);'
+        ),
+        @(
+            'function(e,t,a,s,n){const r=2===s;function i(s)',
+            'function(e,t,a,s,n){const r=1<s;function i(s)'
+        ),
+        @(
+            'totalElements:2===_?v.length:b.length',
+            'totalElements:1<_?v.length:b.length'
+        ),
+        @(
+            'return 2===_?',
+            'return 1<_?'
+        ),
+        @(
+            'classNames:{base:en(jv,x&&Nv),element:en(kv,t&&Sv)}',
+            'classNames:{base:en(jv,x&&Nv),element:en(kv,t&&Sv,3===_&&"hcc-native-carousel--3",4===_&&"hcc-native-carousel--4")}'
+        ),
+        @(
+            'className:en(M$,2===s&&T$)',
+            'className:en(M$,2===s&&T$,3===s&&"hcc-native-carousel-page--3",4===s&&"hcc-native-carousel-page--4")'
+        )
+    )
+}
 foreach ($replacement in $replacements) {
     $from = $replacement[0]
     $to = $replacement[1]
