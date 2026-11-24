@@ -21,7 +21,7 @@ $bundleProfiles = @(
         Name = '2.4.1.0'
         PackagePath = Join-Path $GameRoot 'res\packages\gui-part1.pkg'
         EntryPath = 'gui/gameface/_dist/production/mono/hangar/vehicle_tooltip/bundle.js'
-        SupportedHashes = @('53726CCCEC189A582835F16381DA5A47529A899EFAE96A562350085CF3649AE9')
+        SupportedHashes = @('53726CCCEC189A582835F16381DA5A47529A899EFAE96A562350085CF3649AE9', '3431D4C5026652F6C47766334291CF58203396D506141863CEC035CBB42F98E6')
     },
     @{
         Name = '2.4.0.x'

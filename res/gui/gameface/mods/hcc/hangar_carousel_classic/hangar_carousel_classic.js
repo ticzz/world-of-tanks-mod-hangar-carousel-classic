@@ -13,6 +13,13 @@ const LABELS = {
     filter_marks_incomplete: "Marks incomplete (Tier V+)",
     filter_crew_not_maxed: "Crew not fully trained",
     sort_default: "Default order",
+    sort_nation: "Nation",
+    sort_type: "Vehicle type",
+    sort_level: "Tier",
+    sort_maxBattleTier: "Max battle tier",
+    sort_premium: "Premium vehicles",
+    sort_markOfMastery: "Mastery Badge",
+    sort_battlePassPoints: "Battle Pass points",
     sort_battles: "Battles",
     sort_winRate: "Win rate",
     sort_averageDamage: "Average damage",
@@ -47,6 +54,20 @@ const SORT_ICONS = {
   lastPlayed: "LP"
 };
 
+// Sort criteria without a short text label get a stroke icon in the style of FILTER_ICONS
+const SORT_SVG_ICONS = {
+  nation: '<path d="M6 21V4"/><path d="M6 4h12l-3 4.5 3 4.5H6"/>',
+  type: '<rect x="2.5" y="13" width="17" height="6" rx="3"/><circle cx="6.5" cy="16" r="1"/><circle cx="11" cy="16" r="1"/><circle cx="15.5" cy="16" r="1"/><path d="M4.5 13l2-3.5h10l2 3.5"/><path d="M8 9.5V6h6.5v3.5"/><path d="M14.5 7.5h8"/>',
+  level: '<path d="M6 19l6-4 6 4"/><path d="M6 13.5l6-4 6 4"/><path d="M6 8l6-4 6 4"/>',
+  maxBattleTier: '<path d="M5 4h14"/><path d="M12 20V9"/><path d="M7.5 13.5L12 9l4.5 4.5"/>',
+  premium: '<path d="M4 19h16"/><path d="M4.5 16L3 7l5 3.5L12 4l4 6.5L21 7l-1.5 9z"/>',
+  markOfMastery: '<path d="M12 3l7 2.8v5.4c0 4.4-2.9 7.9-7 9.8-4.1-1.9-7-5.4-7-9.8V5.8z"/><path d="M8.8 12l2.2 2.2 4.2-4.4"/>',
+  battlePassPoints: '<path d="M6 3h12v18l-6-4.2L6 21z"/><path d="M9 9.5l3 2.5 3-2.5"/>'
+};
+
+// The game font has no circular arrow glyph, so the refresh button is drawn as an icon too
+const REFRESH_ICON = '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4.5H15"/>';
+
 const SORT_DIRECTION_ICONS = {
   descending: "v",
   ascending: "^"
@@ -73,6 +94,18 @@ function setButtonIcon(button, filterId) {
   svg.setAttribute("aria-hidden", "true");
   svg.innerHTML = FILTER_ICONS[filterId] || FILTER_ICONS.all;
   button.appendChild(svg);
+}
+
+function setButtonSvg(element, markup, className) {
+  while (element.firstChild) {
+    element.removeChild(element.firstChild);
+  }
+  const svg = document.createElementNS(FILTER_SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("class", className);
+  svg.innerHTML = markup;
+  element.appendChild(svg);
 }
 
 let state = { stats: {}, statsConfig: {}, filtering: {}, sorting: {}, actionCards: {}, carousel: { rows: 2 }, filters: [], activeFilters: [], enabled: false, hangarActive: false };
@@ -418,7 +451,7 @@ function renderNativeFilterPanel() {
   const refresh = document.createElement("button");
   refresh.type = "button";
   refresh.className = "hcc-native-icon-button";
-  refresh.textContent = "↻";
+  setButtonSvg(refresh, REFRESH_ICON, "hcc-native-sort-svg");
   refresh.title = labels().refresh;
   refresh.setAttribute("aria-label", labels().refresh);
   bindTooltip(refresh, labels().refresh, "");
@@ -473,7 +506,11 @@ function renderNativeFilterPanel() {
       button.className = "hcc-native-sort-button";
       const active = activeCriteria.some((criterion) => sortCriterionName(criterion) === mode);
       if (active) button.classList.add("hcc-native-sort-button--active");
-      setButtonGlyph(button, SORT_ICONS[mode] || SORT_ICONS.default, "hcc-native-sort-glyph");
+      if (SORT_SVG_ICONS[mode]) {
+        setButtonSvg(button, SORT_SVG_ICONS[mode], "hcc-native-sort-svg");
+      } else {
+        setButtonGlyph(button, SORT_ICONS[mode] || SORT_ICONS.default, "hcc-native-sort-glyph");
+      }
       const title = labels()[`sort_${mode}`] || mode;
       button.setAttribute("aria-label", title);
       button.title = title;

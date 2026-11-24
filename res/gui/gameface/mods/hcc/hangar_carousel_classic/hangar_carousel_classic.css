@@ -160,7 +160,8 @@
   stroke-linejoin: round;
 }
 
-.hcc-native-sort-button .hcc-native-sort-svg * {
+.hcc-native-sort-button .hcc-native-sort-svg *,
+.hcc-native-icon-button .hcc-native-sort-svg * {
   fill: none !important;
   stroke: #fff !important;
 }
